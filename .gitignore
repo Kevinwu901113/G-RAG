@@ -1,0 +1,69 @@
+# Python相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# 虚拟环境
+venv/
+ENV/
+env/
+.env/
+
+# IDE相关
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# 项目特定文件
+# 数据文件 (可能很大或包含敏感信息)
+data/raw_docs/*
+data/chunks.json
+data/document_graph.pkl
+data/embeddings/*
+data/faiss_index/*
+!data/raw_docs/.gitkeep
+!data/embeddings/.gitkeep
+!data/faiss_index/.gitkeep
+
+# 模型文件 (通常很大，可以通过其他方式分发)
+models/*
+!models/.gitkeep
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+tmp/
+temp/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# 配置文件中可能包含敏感信息的备份
+config.yaml.bak

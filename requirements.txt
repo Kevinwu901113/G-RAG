@@ -1,0 +1,39 @@
+# Graph-Enhanced LightRAG 依赖包
+
+# 基础依赖
+numpy>=1.20.0
+pandas>=1.3.0
+scipy>=1.7.0
+tqdm>=4.62.0
+python-docx
+
+# 深度学习框架
+torch>=1.9.0
+transformers>=4.11.0
+sentence-transformers>=2.2.0
+
+# 图神经网络
+torch-geometric>=2.0.0
+dgl>=0.7.0  # 可选，作为torch-geometric的替代
+
+# 向量检索
+faiss-cpu>=1.7.0  # 如有GPU可替换为faiss-gpu
+
+# NLP工具
+spacy>=3.1.0
+nltk>=3.6.0
+
+# 文档处理
+pyPDF2>=2.0.0
+langchain>=0.0.200  # 用于文档处理和分块
+
+# 评估指标
+rouge>=1.0.0
+bert-score>=0.3.11
+
+# 配置管理
+pyyaml>=6.0
+
+# 可视化（可选）
+matplotlib>=3.4.0
+networkx>=2.6.0  # 用于图可视化
