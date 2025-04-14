@@ -1,39 +1,112 @@
-# Graph-Enhanced LightRAG 依赖包
-
-# 基础依赖
-numpy>=1.20.0
-pandas>=1.3.0
-scipy>=1.7.0
-tqdm>=4.62.0
-python-docx
-
-# 深度学习框架
-torch>=1.9.0
-transformers>=4.11.0
-sentence-transformers>=2.2.0
-
-# 图神经网络
-torch-geometric>=2.0.0
-dgl>=0.7.0  # 可选，作为torch-geometric的替代
-
-# 向量检索
-faiss-cpu>=1.7.0  # 如有GPU可替换为faiss-gpu
-
-# NLP工具
-spacy>=3.1.0
-nltk>=3.6.0
-
-# 文档处理
-pyPDF2>=2.0.0
-langchain>=0.0.200  # 用于文档处理和分块
-
-# 评估指标
-rouge>=1.0.0
-bert-score>=0.3.11
-
-# 配置管理
-pyyaml>=6.0
-
-# 可视化（可选）
-matplotlib>=3.4.0
-networkx>=2.6.0  # 用于图可视化
+lightrag==0.1.0b6
+lightrag-hku==1.0.1
+llama-index==0.12.9
+llama-index-agent-openai==0.4.1
+llama-index-core==0.12.10.post1
+llama-index-embeddings-openai==0.3.1
+llama-index-llms-openai==0.3.12
+llama-index-cli==0.4.0
+llama-index-indices-managed-llama-cloud==0.6.3
+llama-index-multi-modal-llms-openai==0.4.2
+llama-index-program-openai==0.3.1
+llama-index-question-gen-openai==0.3.0
+llama-index-readers-file==0.4.2
+llama-index-readers-llama-parse==0.4.0
+llama-parse==0.5.19
+llama-cloud==0.1.7
+langchain==0.3.13
+langchain-core==0.3.27
+langchain-openai==0.2.13
+langchain-community==0.3.12
+langchain-text-splitters==0.3.4
+openai==1.58.1
+torch==2.5.1
+transformers==4.46.3
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.5.2
+matplotlib==3.9.2
+nltk==3.9.1
+streamlit==1.42.0
+tiktoken==0.7.0
+pydantic==2.9.2
+tqdm==4.67.0
+fastapi==0.115.11
+uvicorn==0.34.0
+accelerate==1.1.1
+aioboto3==13.2.0
+aiobotocore==2.15.2
+aiofiles==24.1.0
+aiohttp==3.11.7
+altair==5.5.0
+beautifulsoup4==4.12.3
+boto3==1.35.36
+botocore==1.35.36
+certifi==2024.8.30
+cryptography==43.0.3
+datasets==3.2.0
+filelock==3.16.1
+fsspec==2024.9.0
+gensim==4.3.3
+gitpython==3.1.44
+google-api-python-client==2.161.0
+google-auth==2.38.0
+huggingface-hub==0.27.0
+ipython==8.29.0
+jieba==0.42.1
+jinja2==3.1.4
+joblib==1.4.2
+jsonschema==4.23.0
+langdetect==1.0.9
+langsmith==0.2.4
+lxml==5.3.0
+markdown-it-py==3.0.0
+networkx==3.4.2
+numba==0.60.0
+olefile==0.47
+orjson==3.10.12
+peft==0.14.0
+pillow==11.0.0
+plotly==5.24.1
+protobuf==5.29.3
+psutil==6.1.1
+pyarrow==18.1.0
+pydantic-settings==2.7.0
+pydantic_core==2.23.4
+pygments==2.18.0
+pypdf==5.1.0
+python-dateutil==2.9.0.post0
+python-docx==1.1.2
+python-dotenv==1.0.1
+python-levenshtein==0.26.1
+python-magic==0.4.27
+pytz==2024.2
+pyyaml==6.0.2
+ragas==0.2.9
+rapidfuzz==3.11.0
+regex==2024.11.6
+requests==2.32.3
+rich==13.9.4
+rouge-score==0.1.2
+safetensors==0.4.5
+scipy==1.12.0
+seaborn==0.13.2
+sentencepiece==0.2.0
+sqlalchemy==2.0.36
+statsmodels==0.14.4
+streamlit-chatbox==1.1.13.post1
+streamlit-feedback==0.1.4
+streamlit-markdown==1.0.9
+sympy==1.13.1
+tenacity==9.0.0
+tokenizers==0.20.3
+tornado==6.4.2
+triton==3.1.0
+trl==0.15.0
+typing_extensions==4.12.2
+umap-learn==0.5.7
+unstructured==0.16.12
+unstructured-client==0.28.1
+urllib3==2.2.3
+watchdog==6.0.0
+zhipuai==2.1.5.20241204 

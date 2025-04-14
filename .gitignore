@@ -49,7 +49,8 @@ data/faiss_index/*
 !data/raw_docs/.gitkeep
 !data/embeddings/.gitkeep
 !data/faiss_index/.gitkeep
-
+data/
+result/
 # 模型文件 (通常很大，可以通过其他方式分发)
 models/*
 !models/.gitkeep
