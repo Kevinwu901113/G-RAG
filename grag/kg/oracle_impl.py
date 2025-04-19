@@ -7,8 +7,8 @@ from typing import Union
 import numpy as np
 import array
 
-from ..utils import logger
-from ..base import (
+from ..utils.common import logger
+from ..core.base import (
     BaseGraphStorage,
     BaseKVStorage,
     BaseVectorStorage,

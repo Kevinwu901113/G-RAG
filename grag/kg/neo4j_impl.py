@@ -3,8 +3,8 @@ import os
 from dataclasses import dataclass
 from typing import Any, Union, Tuple, List, Dict
 import inspect
-from lightrag.utils import logger
-from ..base import BaseGraphStorage
+from ..utils.common import logger
+from ..core.base import BaseGraphStorage
 from neo4j import (
     AsyncGraphDatabase,
     exceptions as neo4jExceptions,

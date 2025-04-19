@@ -1,0 +1,76 @@
+# GRAG项目配置文件
+
+# LLM模型配置
+llm:
+  # 模型提供商和名称
+  provider: "ollama"  # 可选: "ollama", "openai", "azure_openai", "bedrock", "huggingface"
+  model_name: "qwen2.5:7b-instruct-fp16"
+  host: "http://localhost:11434"
+  options:
+    num_ctx: 32768
+
+# 嵌入模型配置
+embedding:
+  # 嵌入模型提供商和名称
+  provider: "ollama"  # 可选: "ollama", "openai", "azure_openai", "bedrock", "huggingface"
+  model_name: "bge-m3"
+  host: "http://localhost:11434"
+  embedding_dim: 1024
+  max_token_size: 8192
+  batch_size: 32
+
+# 文档处理配置
+document:
+  # 文档分块设置
+  chunk_size: 1000
+  chunk_overlap: 200
+
+# 存储配置
+storage:
+  working_dir: "./result/grag_data"
+  embedding_batch_num: 32
+
+# 查询配置
+query:
+  # 检索模式
+  default_mode: "hybrid"  # 可选: "local", "global", "hybrid", "naive"
+  top_k: 60
+  max_token_for_text_unit: 4000
+  max_token_for_global_context: 4000
+  max_token_for_local_context: 4000
+  cosine_better_than_threshold: 0.2
+
+# 缓存配置
+cache:
+  seed: 42
+  capacity: 1000
+
+# 模型特定配置
+model_specific:
+  # OpenAI嵌入模型
+  openai_embedding:
+    model_name: "text-embedding-3-small"
+    embedding_dim: 1536
+    max_token_size: 8192
+  
+  # Azure OpenAI嵌入模型
+  azure_openai_embedding:
+    model_name: "text-embedding-3-small"
+    embedding_dim: 1536
+    max_token_size: 8192
+  
+  # Bedrock嵌入模型
+  bedrock_embedding:
+    model_name: "amazon.titan-embed-text-v2:0"
+    embedding_dim: 1536
+    max_token_size: 8192
+  
+  # Ollama嵌入模型
+  ollama_embedding:
+    model_name: "llama3"  # 默认值，当前使用的是bge-m3
+    embedding_dim: 4096  # 默认值，当前使用的是1024
+    max_token_size: 8192
+  
+  # Hugging Face嵌入模型
+  huggingface_embedding:
+    max_token_size: 512

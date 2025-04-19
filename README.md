@@ -1,87 +1,196 @@
-# LightRAG 项目环境安装指南
+# GRAG: Graph-based Retrieval-Augmented Generation
 
-本文档提供了复制LightRAG项目环境的详细步骤。
+GRAG是一个基于图的检索增强生成系统，它结合了知识图谱和向量检索的优势，为大语言模型提供更丰富的上下文信息。
 
-## 环境要求
+## 特性
 
-- Anaconda 或 Miniconda
-- Python 3.10.6
+- **多模式检索**：支持本地(local)、全局(global)、混合(hybrid)和朴素(naive)四种检索模式
+- **知识图谱集成**：自动从文档中提取实体和关系，构建知识图谱
+- **灵活的存储后端**：支持多种存储后端，包括本地文件、Neo4j和Oracle
+- **多种嵌入模型**：支持OpenAI、Azure OpenAI、Amazon Bedrock、Ollama和Hugging Face等多种嵌入模型
+- **异步API**：全异步API设计，支持高并发查询
+- **流式响应**：支持流式生成回答，提供更好的用户体验
 
-## 安装方法
-
-### 方法1：使用环境配置文件（推荐）
-
-这是最简单的方法，可以完全复制原始环境:
-
-```bash
-# 克隆仓库
-git clone [项目URL]
-cd [项目目录]
-
-# 创建并激活环境
-conda env create -f environment.yml
-conda activate LightRAG
-```
-
-### 方法2：使用脚本安装
-
-提供了一个自动化脚本帮助安装:
+## 安装
 
 ```bash
-# 添加执行权限
-chmod +x setup.sh
+# 基本安装
+pip install -e .
 
-# 运行安装脚本
-./setup.sh
+# 安装所有可选依赖
+pip install -e ".[all]"
+
+# 安装特定可选依赖
+pip install -e ".[neo4j,docx]"
 ```
 
-### 方法3：手动安装主要依赖
+## 快速开始
 
-如果您不需要完全相同的环境，可以只安装核心依赖:
+### 基本用法
 
-```bash
-# 创建Python 3.10.6的conda环境
-conda create -n LightRAG python=3.10.6 -y
-conda activate LightRAG
+```python
+import asyncio
+from grag.core.base import QueryParam
+from grag.rag.lightrag import LightRAG
+from grag.core.llm import ollama_model_complete, ollama_embedding
+from grag.utils.common import wrap_embedding_func_with_attrs
+from grag.core.storage import JsonKVStorage, NanoVectorDBStorage, NetworkXStorage
 
-# 安装核心依赖
-pip install llama-index==0.12.9 
-pip install openai==1.58.1 
-pip install langchain==0.3.13 
-pip install lightrag==0.1.0b6 
-pip install lightrag-hku==1.0.1
+async def main():
+    # 创建嵌入函数
+    embedding_func = wrap_embedding_func_with_attrs(
+        embedding_dim=1024,
+        max_token_size=8192
+    )(
+        lambda texts: ollama_embedding(
+            texts, embed_model="bge-m3", host="http://localhost:11434"
+        )
+    )
+    
+    # 创建全局配置
+    global_config = {
+        "working_dir": "./result/grag_data",
+        "embedding_batch_num": 32,
+        "cosine_better_than_threshold": 0.2,
+        "llm_model_name": "qwen2.5:7b-instruct-fp16",
+    }
+    
+    # 创建存储实例
+    doc_full_storage = JsonKVStorage(
+        namespace="full_docs",
+        global_config=global_config,
+        embedding_func=embedding_func
+    )
+    
+    doc_chunks_storage = JsonKVStorage(
+        namespace="text_chunks",
+        global_config=global_config,
+        embedding_func=embedding_func
+    )
+    
+    chunks_vector_storage = NanoVectorDBStorage(
+        namespace="chunks",
+        global_config=global_config,
+        embedding_func=embedding_func,
+        meta_fields={"tokens", "chunk_order_index", "full_doc_id"}
+    )
+    
+    entity_vector_storage = NanoVectorDBStorage(
+        namespace="entities",
+        global_config=global_config,
+        embedding_func=embedding_func,
+        meta_fields={"entity_name"}
+    )
+    
+    relationship_vector_storage = NanoVectorDBStorage(
+        namespace="relationships",
+        global_config=global_config,
+        embedding_func=embedding_func,
+        meta_fields={"src_id", "tgt_id"}
+    )
+    
+    graph_storage = NetworkXStorage(
+        namespace="graph",
+        global_config=global_config,
+        embedding_func=embedding_func
+    )
+    
+    # 创建LightRAG实例
+    rag = LightRAG(
+        doc_full_storage=doc_full_storage,
+        doc_chunks_storage=doc_chunks_storage,
+        chunks_vector_storage=chunks_vector_storage,
+        entity_vector_storage=entity_vector_storage,
+        relationship_vector_storage=relationship_vector_storage,
+        graph_storage=graph_storage,
+        llm_model_func=ollama_model_complete,
+        llm_model_kwargs={
+            "host": "http://localhost:11434", 
+            "options": {"num_ctx": 32768}
+        },
+        embedding_func=embedding_func,
+    )
+    
+    # 索引文档
+    doc_id = await rag.index_document("这是一个示例文档，用于测试GRAG系统。")
+    
+    # 查询
+    answer = await rag.aquery("这个文档是关于什么的？", param=QueryParam(mode="hybrid"))
+    print(answer)
 
-# 安装其他常用依赖
-pip install numpy pandas scikit-learn matplotlib torch transformers
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-## 验证安装
+### 使用不同的检索模式
 
-安装完成后，可以运行以下命令验证环境:
+GRAG支持四种检索模式：
 
-```bash
-# 激活环境
-conda activate LightRAG
+1. **本地模式(local)**：基于实体的检索，适合查询特定实体的信息
+2. **全局模式(global)**：基于关系的检索，适合查询实体间关系的信息
+3. **混合模式(hybrid)**：结合本地和全局模式，提供更全面的上下文
+4. **朴素模式(naive)**：直接基于文本块的检索，适合简单查询
 
-# 验证Python版本
-python --version  # 应显示 Python 3.10.6
+```python
+from grag.core.base import QueryParam
 
-# 验证关键包
-python -c "import lightrag; print(f'lightrag版本: {lightrag.__version__}')"
-python -c "import llama_index; print(f'llama_index版本: {llama_index.__version__}')"
+# 本地模式
+answer_local = await rag.aquery("实体A的信息是什么？", param=QueryParam(mode="local"))
+
+# 全局模式
+answer_global = await rag.aquery("实体A和实体B之间的关系是什么？", param=QueryParam(mode="global"))
+
+# 混合模式
+answer_hybrid = await rag.aquery("实体A的信息及其与其他实体的关系是什么？", param=QueryParam(mode="hybrid"))
+
+# 朴素模式
+answer_naive = await rag.aquery("文档中提到了什么内容？", param=QueryParam(mode="naive"))
 ```
 
-## 注意事项
+### 流式响应
 
-- 环境配置文件中使用了中国镜像源，国际用户可能需要修改
-- 完整环境较大，安装可能需要一些时间
-- 如果遇到包冲突，建议使用方法1或方法2进行安装
+GRAG支持流式生成回答，提供更好的用户体验：
 
-## 故障排除
+```python
+async def stream_example():
+    # 流式生成回答
+    async for token in rag.astream("这个文档是关于什么的？", param=QueryParam(mode="hybrid")):
+        print(token, end="", flush=True)
+    print()
 
-如果安装过程中遇到问题:
+asyncio.run(stream_example())
+```
 
-1. 确保已正确安装Anaconda或Miniconda
-2. 检查是否有足够的磁盘空间
-3. 如果某些包安装失败，可尝试单独安装它们
-4. 对于网络问题，可以尝试使用国内镜像源 
+## 项目结构
+
+```
+grag/
+├── grag/
+│   ├── __init__.py
+│   ├── core/
+│   │   ├── __init__.py
+│   │   ├── base.py          # 基础类和接口定义
+│   │   ├── llm.py           # LLM集成
+│   │   ├── prompt.py        # 提示模板
+│   │   ├── storage.py       # 存储实现
+│   │   └── stream.py        # 流式响应支持
+│   ├── kg/
+│   │   ├── __init__.py
+│   │   ├── neo4j_impl.py    # Neo4j存储实现
+│   │   └── oracle_impl.py   # Oracle存储实现
+│   ├── rag/
+│   │   ├── __init__.py
+│   │   ├── lightrag.py      # 核心RAG实现
+│   │   ├── query.py         # 查询功能
+│   │   └── embedding.py     # 嵌入功能
+│   └── utils/
+│       ├── __init__.py
+│       └── common.py        # 通用工具函数
+├── main.py                  # 主程序入口
+├── setup.py                 # 安装脚本
+└── README.md                # 项目说明
+```
+
+## 许可证
+
+MIT

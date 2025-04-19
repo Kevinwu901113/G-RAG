@@ -9,47 +9,71 @@ PROMPTS["process_tickers"] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "
 
 PROMPTS["DEFAULT_ENTITY_TYPES"] = ["组织名称", "个人姓名", "地理位置", "事件","时间","职位","金额","面积","人数"]
 
-PROMPTS["entity_extraction"] = """-Goal-
+PROMPTS["entity_extraction"] = """
+-目标活动-
+你是一个人工智能助手，专门帮助辨别实体和实体间的关系，严格遵照要求进行处理。
+
+-目标-
 给定可能与此活动相关的文本文档和实体类型列表，从文本中标识这些类型的所有实体以及标识的实体之间的所有关系。
+如果你不知道答案，就说出来。不要编造任何东西。
+请勿在未提供支持证据的情况下提供信息。
+请你严格执行所有的格式要求。允许你在输出前重新思考。
 
--Steps-
-1. 标识所有实体。对于每个已识别的实体，提取以下信息：
-- entity_name: 实体的名称，使用与输入文本相同的语言。如果是英文，请将名称大写。如果是日期，请严格按照y年份m月份d日期的格式，（m和d如果没有就省略）
-- entity_type: 属于以下一种实体属性: [{entity_types}]
-- entity_description: 文本中有关该实体的所有事件描述，包括事件时间（时间严格按照y2020m12d12的格式）、发生地点以及事件总结(事件总结必须包含完整的主谓宾结构以及完整的名称，例如完整的公司或者是组织名称；“2163平方米为建筑面积”这样的表达是错误的，正确的表达是“光明广场的建筑面积是2163平方米”）以及其他补充细节
-将每个实体的格式设置为 ("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>
-提到的所有时间均改写为y年份m月份d日期的格式（例如2020年11月11日表示为y2020m11d11，2023年表示为y2023）
+-步骤-
+1. 标识所有实体。对于每个已识别的实体，使用json格式输出，并且严格按照要求提取需包含以下键的信息，若是不清楚的信息统一输出未知：
+- node_name: 实体的名称，使用与输入文本相同的语言。
+- node_type: 必须为 "entity"。
+- name_type: 属于以下一种实体类型: [{entity_types}]
+- attributes: 包含[time,place,event,other]
+  - time: 时间，日期。
+  - place: 地点名称。
+  - event: 涉及的主要事件描述
+  - other: 补充描述。
+将每个实体的格式设置为 ("entity"{tuple_delimiter}<node_type>{tuple_delimiter}<node_name>{tuple_delimiter}<name_type>{tuple_delimiter}<attributes>)
 
-2. 从步骤 1 中识别的实体中，识别出彼此*明显相关*的所有 (source_entity,target_entity) 对。
+2.从步骤1中识别的实体中，严格按照以下进行格式处理，使用json输出:
+- node_name: 暂不处理。
+- node_type：必须为"entity"。
+- name_type: 属于以下一种实体类型：[{entity_types}]
+- attributes: 必须要包含[time,place,event,other]
+  - time: 处理为 *[yxxxxmxxdxx]* 格式,不要附带任何额外字如年、月、日。（例如2012年7月28日记作y2012m07d28），若无月份和日期，可省略 mxxdxx（例如2023年5月记作y2023m05，2023年记作y2023）。
+  - place: 不做处理
+  - event: 必须包含完整的主谓宾结构
+  - other: 补充描述
+将每个实体的格式设置为 ("entity"{tuple_delimiter}<node_type>{tuple_delimiter}<node_name>{tuple_delimiter}<name_type>{tuple_delimiter}<attributes>)
+  
+
+3. 从步骤 1 中识别的实体中，识别出彼此相关的*所有* (source_entity,target_entity) 对。
+理论上每个实体至少都需要被包含在至少一个(source_entity,target_entity) 对中。
 对于每对相关实体，提取以下信息:
-- source_entity: 源实体的名称，如step 1 中标识的
-- target_entity: 目标实体的名称，如step 1 中标识的
+- source_entity: 在步骤1识别出的源实体名称
+- target_entity: 在步骤1识别出的目标实体名称
 - relationship_description: 解释为什么源实体和目标实体彼此相关
 - relationship_strength: 一个量化分数，指示源实体和目标实体之间关系的强度
 - relationship_keywords: 一个或多个高级关键字，用于总结关系的总体性质，侧重于概念或主题，而不是特定细节
 将每个关系的格式设置为 ("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
 
-3. 确定概括整篇文章的主要概念、主题或主题的高级关键词。这些应该捕捉到文档中的总体思想。
+4. 确定概括整篇文章的主要概念、主题或主题的高级关键词。这些应该捕捉到文档中的总体思想。
 将内容级关键字的格式设置为("content_keywords"{tuple_delimiter}<high_level_keywords>)
 
-4. 将输出作为步骤 1 和 2 中标识的所有实体和关系的单个列表返回。 使用 **{record_delimiter}** 作为列表分割符.
+5. 将输出作为步骤 1 和 2 中标识的所有实体和关系的单个列表返回。 使用 **{record_delimiter}** 作为列表分割符.
 
-5. 不要因为篇幅省略任何实体以及关系内容
+6. 不要因为篇幅省略任何实体以及关系内容
 
-6. 完成后，输出 {completion_delimiter}
+7. 完成后，输出 {completion_delimiter}
 
 ######################
--Examples-
+-范例-
 ######################
-Example 1:
+范例 1:
 
 Entity_types: ["公司或组织名称", "个人姓名", "地理位置", "事件","时间","职位","金额","面积","人数"]
-Text:
-新兴集团创办于1974年，董事长：张国宝先生，集团由新兴橡根花边厂和新康针织有限公司组成。厂区坐落公明镇薯田埔村，总占地面积50万平方米，厂房面积30万平方米，宿舍6万平方米，现有员工6000人，设备总投资额7亿港元，拥有数千台世界先进的针织机、经编机和最先进的CAD SYSTEM。主要生产橡根花边、针织布、哩士等，产品主要销往欧美、中东等地，年出口额达5000万美元，是亚洲内衣原料的最大供应商。集团正在不断更新棉纺、化纤加工丝、针织布、弹性花边及整套染整设备，使之成为一个全面的纺织工业集团。
+文本:
+新兴集团创办于1974年11月12日，董事长：张国宝先生，集团由新兴橡根花边厂和新康针织有限公司组成。厂区坐落公明镇薯田埔村，总占地面积50万平方米，厂房面积30万平方米，宿舍6万平方米，现有员工6000人，设备总投资额7亿港元，拥有数千台世界先进的针织机、经编机和最先进的CAD SYSTEM。主要生产橡根花边、针织布、哩士等，产品主要销往欧美、中东等地，年出口额达5000万美元，是亚洲内衣原料的最大供应商。集团正在不断更新棉纺、化纤加工丝、针织布、弹性花边及整套染整设备，使之成为一个全面的纺织工业集团。
 ################
-Output:
+输出:
 ("entity"{tuple_delimiter}"张国宝"{tuple_delimiter}"个人姓名"{tuple_delimiter}"{{time: "y1970", place: "公明镇", event: "张国宝成为新兴集团董事长", other: ""}}"){record_delimiter}
-("entity"{tuple_delimiter}"新兴集团"{tuple_delimiter}"公司或组织名称"{tuple_delimiter}"{{time: "y1974", place: "未知", event: "新兴集团成立", other: ""}}{{time: "y1970", place: "公明镇", event: "张国宝成为新兴集团董事长", other: ""}}{{time: "未知", place: "公明镇", event: "新兴集团由新兴橡根花边厂和新康针织有限公司组成", other: ""}}"){record_delimiter}
+("entity"{tuple_delimiter}"新兴集团"{tuple_delimiter}"公司或组织名称"{tuple_delimiter}"{{time: "y1974m11d12", place: "未知", event: "新兴集团成立", other: ""}}{{time: "y1970", place: "公明镇", event: "张国宝成为新兴集团董事长", other: ""}}{{time: "未知", place: "公明镇", event: "新兴集团由新兴橡根花边厂和新康针织有限公司组成", other: ""}}"){record_delimiter}
 ("entity"{tuple_delimiter}"新兴橡根花边厂"{tuple_delimiter}"公司或组织名称"{tuple_delimiter}"{{time: "未知", place: "公明镇", event: "新兴橡根花边厂是新兴集团的子公司", other: "新兴集团存在多个子公司"}}"){record_delimiter}
 ("entity"{tuple_delimiter}"新康针织有限公司"{tuple_delimiter}"公司或组织名称"{tuple_delimiter}"{{time: "未知", place: "公明镇", event: "新康针织有限公司是新兴集团的子公司", other: "新兴集团存在多个子公司"}}"){record_delimiter}
 ("entity"{tuple_delimiter}"公明镇薯田埔村"{tuple_delimiter}"地理位置"{tuple_delimiter}"{{time: "未知", place: "公明镇", event: "公明镇薯田埔村是新兴集团的地理位置", other: ""}}"){record_delimiter}
@@ -91,12 +115,22 @@ Output:
 
 PROMPTS[
     "entiti_continue_extraction"
-] = """在上次提取中缺少许多实体。 使用相同的格式将它们添加到下面：
+] = """在上次提取中缺少许多实体或者关系。 使用相同的格式将它们添加到下面：
 """
 
 PROMPTS[
     "entiti_if_loop_extraction"
-] = """似乎某些实体可能仍然被遗漏。回答 YES | NO 如果仍有需要添加的实体.
+] = """似乎某些实体和关系可能仍然被遗漏。回答 YES | NO 如果仍有需要添加的实体.
+"""
+
+PROMPTS[
+    "relation_continue_extraction"
+] = """在上次提取中缺少许多关系。 使用相同的格式将它们添加到下面：
+"""
+
+PROMPTS[
+  "relation_if_loop_extraction"
+] = """似乎遗漏了许多关系。回答 YES | NO 如果仍有需要添加的关系.
 """
 
 PROMPTS["fail_response"] = "抱歉，我无法回答这个问题。"
@@ -112,6 +146,10 @@ PROMPTS["rag_response"] = """---Role---
 如果你不知道答案，就说出来。不要编造任何东西。
 请勿在未提供支持证据的情况下提供信息。
 
+---Question---
+
+{query}
+
 ---Target response length and format---
 
 {response_type}
@@ -120,16 +158,30 @@ PROMPTS["rag_response"] = """---Role---
 
 {context_data}
 
-根据query中要求的长度和格式进行回答。你只需要提供对问题的回复，不要再重复引用数据表中的原文。
+请直接回答上述问题，不要重复引用数据表中的原文。根据要求的长度和格式进行回答。
 """
 
-PROMPTS["norag_response"] = """---Role---
+PROMPTS["norag_response"] = """
+下面给你一个问题和针对该问题的两个回答。第一个回答是基准答案，第二个回答是LLM生成的答案。
+请你对生成的答案进行评分，1是最低分，5是最高分。请注意，基准答案不一定是最佳答案。评价标准如下：
+'5分：生成的答案完全包含基准答案的所有信息，并且包含的其他信息都与问题相关。'
+'4分：生成的答案包含基准答案的所有信息，但是有一些和问题不太相关的信息。\n'
+'3分：生成的答案仅包含基准答案的部分信息，但是没有错误信息。\n'
+'2分：生成的答案仅包含基准答案的部分信息，并且有一些错误信息。\n'
+'1分：生成的答案与基准答案完全不匹配，在时间/地点/人物等关键方面完全错误。\n'
+'当生成的答案包含基准答案的所有信息时，无论有多少额外信息，都应给不少于4分。\n'
+'在第一行中只告诉我评分，在第二行开始告诉我理由。\n'
+'回复举例： 1分 \\n 生成的答案与基准答案完全无关。\n'
+'问题：{question}\n基准答案：{answer}\n生成的答案：{answer1}
+"""
+
+PROMPTS["norag_response1"] = """---Role---
 
 您是一个LLM问答分析助手，帮助分析Data tables中哪些原文部分导致LLM模型生成了这样的Answer，我会提供给你Data tables，Question以及Answer。
 
 ---Goal---
 
-只返回相应的Data tables原文部分，不要作多余回答，不要生成无关信息。不要直接返回Answer里面的内容。如果Data tables没有对应的内容，返回“无”。
+只返回相应的Data tables原文部分，不要作多余回答，不要生成无关信息。不要直接返回Answer里面的内容。如果Data tables没有对应的内容，返回"无"。
 
 ---Question---
 
@@ -151,6 +203,9 @@ PROMPTS["norag_response"] = """---Role---
 
 """
 
+
+
+
 PROMPTS["keywords_extraction"] = """---Role---
 
 你是一个有用的助手，负责识别用户查询中的高级和低级关键字。
@@ -164,7 +219,7 @@ PROMPTS["keywords_extraction"] = """---Role---
 - 以 JSON 格式输出关键字。
 - JSON文件应该包含两个关键字:
   - "high_level_keywords" 代表总体概念或主题.
-  - "low_level_keywords" 代表特定的实体或者细节.
+  - "low_level_keywords" 代表特定的实体或者细节,包括"组织名称", "个人姓名", "地理位置", "事件","时间","职位","金额","面积","人数"等,其中时间处理为 *[yxxxxmxxdxx]* 格式,不要附带任何额外字如年、月、日。（例如2012年7月28日记作y2012m07d28），若无月份和日期，可省略 mxxdxx（例如2023年5月记作y2023m05，2023年记作y2023）.
 
 ######################
 -Examples-
@@ -181,12 +236,12 @@ Output:
 #############################
 Example 2:
 
-Query: "What are the environmental consequences of deforestation on biodiversity?"
+Query: "1992年，麦东北在深圳市公明镇哪个部门任职？"
 ################
 Output:
 {{
-  "high_level_keywords": ["Environmental consequences", "Deforestation", "Biodiversity loss"],
-  "low_level_keywords": ["Species extinction", "Habitat destruction", "Carbon emissions", "Rainforest", "Ecosystem"]
+  "high_level_keywords": ["职业生涯", "政府部门"],
+  "low_level_keywords": ["y1992", "麦东北", "深圳市公明镇"]
 }}
 #############################
 Example 3:
@@ -218,6 +273,10 @@ PROMPTS["naive_rag_response"] = """---Role---
 如果你不知道答案，就说出来。不要编造任何东西。
 请勿在未提供支持证据的情况下提供信息。
 
+---Question---
+
+{query}
+
 ---Target response length and format---
 
 {response_type}
@@ -226,5 +285,5 @@ PROMPTS["naive_rag_response"] = """---Role---
 
 {content_data}
 
-根据长度和格式，向响应添加部分和评论。在 markdown 中设置响应的样式。
+请直接回答上述问题，不要重复引用文档中的原文。根据要求的长度和格式进行回答，在 markdown 中设置响应的样式。
 """

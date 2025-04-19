@@ -3,7 +3,7 @@ from typing import TypedDict, Union, Literal, Generic, TypeVar
 
 import numpy as np
 
-from .utils import EmbeddingFunc
+from ..utils.common import EmbeddingFunc
 
 TextChunkSchema = TypedDict(
     "TextChunkSchema",
@@ -124,4 +124,4 @@ class BaseGraphStorage(StorageNameSpace):
         raise NotImplementedError
 
     async def embed_nodes(self, algorithm: str) -> tuple[np.ndarray, list[str]]:
-        raise NotImplementedError("Node embedding is not used in lightrag.")
+        raise NotImplementedError("Node embedding is not used in grag.")

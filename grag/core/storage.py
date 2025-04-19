@@ -7,7 +7,7 @@ import networkx as nx
 import numpy as np
 from nano_vectordb import NanoVectorDB
 
-from .utils import (
+from ..utils.common import (
     logger,
     load_json,
     write_json,

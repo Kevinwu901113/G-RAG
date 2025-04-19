@@ -1,6 +1,6 @@
 import asyncio
 from typing import AsyncGenerator, Dict, Any
-from lightrag import LightRAG, QueryParam
+from ..rag.lightrag import LightRAG, QueryParam
 
 def _generate_prompt(self, query: str, context: str, param: QueryParam = None) -> str:
     """

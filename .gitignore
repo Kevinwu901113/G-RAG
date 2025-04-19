@@ -1,8 +1,52 @@
-# Python相关
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Project specific
+result/
+data/
+*.log
+*.json
+*.db
+*.sqlite
+*.sqlite3
+*.graphml
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Distribution / packaging
 .Python
 env/
 build/
@@ -16,55 +60,35 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-.pytest_cache/
-.coverage
+
+# Unit test / coverage reports
 htmlcov/
 .tox/
-.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
 .hypothesis/
 
-# 虚拟环境
+# Environments
+.env
+.venv
+env/
 venv/
 ENV/
-env/
-.env/
+env.bak/
+venv.bak/
 
-# IDE相关
-.idea/
-.vscode/
-*.swp
-*.swo
-.DS_Store
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
-# 项目特定文件
-# 数据文件 (可能很大或包含敏感信息)
-data/raw_docs/*
-data/chunks.json
-data/document_graph.pkl
-data/embeddings/*
-data/faiss_index/*
-!data/raw_docs/.gitkeep
-!data/embeddings/.gitkeep
-!data/faiss_index/.gitkeep
-data/
-result/
-# 模型文件 (通常很大，可以通过其他方式分发)
-models/*
-!models/.gitkeep
-
-# 日志文件
-*.log
-logs/
-
-# 临时文件
-tmp/
-temp/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# 配置文件中可能包含敏感信息的备份
-config.yaml.bak
+# Pyre type checker
+.pyre/

@@ -6,10 +6,12 @@ import json
 import logging
 import os
 import re
+import sys
+import time
 from dataclasses import dataclass
 from functools import wraps
 from hashlib import md5
-from typing import Any, Union, List
+from typing import Any, Union, List, Optional
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -17,22 +19,33 @@ import tiktoken
 
 ENCODER = None
 
-logger = logging.getLogger("lightrag")
+logger = logging.getLogger("grag")
 
 
 def set_logger(log_file: str):
     logger.setLevel(logging.DEBUG)
 
+    # 创建文件处理器
     file_handler = logging.FileHandler(log_file)
     file_handler.setLevel(logging.DEBUG)
 
+    # 创建控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+
+    # 设置格式
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
     file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
 
-    if not logger.handlers:
-        logger.addHandler(file_handler)
+    # 清除现有处理器并添加新处理器
+    logger.handlers = []
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    logger.info(f"日志将被保存到: {log_file}")
 
 
 @dataclass
@@ -290,3 +303,121 @@ def process_combine_contexts(hl, ll):
     combined_sources_result = "\n".join(combined_sources_result)
 
     return combined_sources_result
+
+
+class ProgressBar:
+    """
+    用于显示进度条的类
+    """
+    def __init__(self, total: int, prefix: str = '', suffix: str = '', 
+                 decimals: int = 1, length: int = 50, fill: str = '█', 
+                 print_end: str = '\r', log_file: Optional[str] = None):
+        """
+        初始化进度条
+        
+        Args:
+            total: 总迭代次数
+            prefix: 前缀字符串
+            suffix: 后缀字符串
+            decimals: 百分比的小数位数
+            length: 进度条的字符长度
+            fill: 进度条填充字符
+            print_end: 打印结束字符
+            log_file: 日志文件路径，如果提供则同时记录到日志文件
+        """
+        self.total = total
+        self.prefix = prefix
+        self.suffix = suffix
+        self.decimals = decimals
+        self.length = length
+        self.fill = fill
+        self.print_end = print_end
+        self.log_file = log_file
+        self.iteration = 0
+        self.start_time = time.time()
+        # 保存当前光标位置并移动到底部
+        sys.stdout.write('\x1b[s\x1b[999B\x1b[2K')
+        self._print_progress()
+    
+    def update(self, iteration: Optional[int] = None, suffix: Optional[str] = None):
+        """
+        更新进度条
+        
+        Args:
+            iteration: 当前迭代次数，如果为None则自动加1
+            suffix: 更新后缀文本
+        """
+        if iteration is not None:
+            self.iteration = iteration
+        else:
+            self.iteration += 1
+            
+        if suffix is not None:
+            self.suffix = suffix
+            
+        self._print_progress()
+    
+    def _print_progress(self):
+        """打印进度条"""
+        percent = ("{0:." + str(self.decimals) + "f}").format(100 * (self.iteration / float(self.total)))
+        filled_length = int(self.length * self.iteration // self.total)
+        bar = self.fill * filled_length + '-' * (self.length - filled_length)
+        
+        # 计算已用时间和估计剩余时间
+        elapsed_time = time.time() - self.start_time
+        if self.iteration > 0:
+            eta = elapsed_time * (self.total / self.iteration - 1)
+            time_info = f" | 用时: {self._format_time(elapsed_time)} | 剩余: {self._format_time(eta)}"
+        else:
+            time_info = ""
+            
+        progress_line = f'\r\033[1G{self.prefix} |{bar}| {percent}% {self.suffix}{time_info}'
+        
+        # 打印到控制台
+        sys.stdout.write('\x1b[u\x1b[2K')  # 恢复光标位置并清除行
+        sys.stdout.write(progress_line + self.print_end)
+        sys.stdout.flush()
+        
+        # 如果提供了日志文件，也记录到日志
+        if self.log_file and logger.handlers:
+            logger.info(progress_line.strip())
+    
+    def _format_time(self, seconds: float) -> str:
+        """格式化时间为人类可读格式"""
+        m, s = divmod(int(seconds), 60)
+        h, m = divmod(m, 60)
+        return f"{h:02d}:{m:02d}:{s:02d}" if h > 0 else f"{m:02d}:{s:02d}"
+    
+    def finish(self):
+        """完成进度条"""
+        self.update(self.total)
+        # 打印换行符，使下一行输出从新行开始
+        sys.stdout.write('\x1b[u')  # 恢复光标位置
+        sys.stdout.write('\n')
+        sys.stdout.flush()
+        
+        # 记录完成信息到日志
+        if self.log_file and logger.handlers:
+            elapsed_time = time.time() - self.start_time
+            logger.info(f"任务完成，总用时: {self._format_time(elapsed_time)}")
+
+
+def create_progress_bar(total: int, description: str, log_file: Optional[str] = None) -> ProgressBar:
+    """
+    创建并返回一个进度条实例
+    
+    Args:
+        total: 总迭代次数
+        description: 进度条描述
+        log_file: 日志文件路径
+        
+    Returns:
+        ProgressBar实例
+    """
+    return ProgressBar(
+        total=total,
+        prefix=f'{description}',
+        suffix='完成',
+        length=50,
+        log_file=log_file
+    )
