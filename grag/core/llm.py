@@ -6,7 +6,7 @@ import aioboto3
 import aiohttp
 import numpy as np
 import ollama
-
+import asyncio
 from openai import (
     AsyncOpenAI,
     APIConnectionError,
@@ -295,40 +295,88 @@ async def hf_model_if_cache(
     return response_text
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError, ollama.ResponseError)),
+)
 async def ollama_model_if_cache(
-    model, prompt, system_prompt=None, temperature=0.8,history_messages=[], **kwargs
+    model, prompt, system_prompt=None, temperature=0.8, history_messages=[], **kwargs
 ) -> str:
+    """
+    使用Ollama API进行模型调用，支持超时设置和自动重试
     
+    Args:
+        model: 模型名称
+        prompt: 提示文本
+        system_prompt: 系统提示
+        temperature: 温度参数
+        history_messages: 历史消息
+        **kwargs: 其他参数，可包含:
+            - timeout: 超时设置（秒）
+            - host: Ollama服务器地址
+            - max_retries: 最大重试次数
+    """
+    # 移除不兼容的参数
     kwargs.pop("max_tokens", None)
     kwargs.pop("response_format", None)
-    host = kwargs.pop("host", None)
-    timeout = kwargs.pop("timeout", None)
-    if 'options' not in kwargs or not isinstance(kwargs['options'], dict):
-        kwargs['options'] = {}  # 如果不存在或不是字典，则初始化为空字典
-    # kwargs['options']['temperature'] = temperature
     
+    # 提取和设置超时参数，默认为180秒（大幅增加以处理复杂请求）
+    host = kwargs.pop("host", None)
+    timeout = kwargs.pop("timeout", 180)
+    
+    # 确保options字典存在
+    if 'options' not in kwargs or not isinstance(kwargs['options'], dict):
+        kwargs['options'] = {}
+    
+    # 设置温度参数
+    kwargs['options']['temperature'] = temperature
+    
+    # 创建Ollama客户端
     ollama_client = ollama.AsyncClient(host=host, timeout=timeout)
+    
+    # 准备消息
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
 
+    # 获取缓存存储
     hashing_kv: BaseKVStorage = kwargs.pop("hashing_kv", None)
-    messages.extend(history_messages)
+    
+    # 确保历史消息格式正确
+    valid_history_messages = []
+    for msg in history_messages:
+        if isinstance(msg, dict) and "role" in msg and "content" in msg:
+            valid_history_messages.append(msg)
+    
+    messages.extend(valid_history_messages)
     messages.append({"role": "user", "content": prompt})
+    
+    # 检查缓存
     if hashing_kv is not None:
         args_hash = compute_args_hash(model, messages)
         if_cache_return = await hashing_kv.get_by_id(args_hash)
         if if_cache_return is not None:
             return if_cache_return["return"]
 
-    response = await ollama_client.chat(model=model, messages=messages, **kwargs)
-
-    result = response["message"]["content"]
-
-    if hashing_kv is not None:
-        await hashing_kv.upsert({args_hash: {"return": result, "model": model}})
-
-    return result
+    try:
+        # 调用Ollama API，使用asyncio.wait_for添加额外的超时保护层
+        response = await asyncio.wait_for(
+            ollama_client.chat(model=model, messages=messages, **kwargs),
+            timeout=timeout
+        )
+        result = response["message"]["content"]
+        
+        # 更新缓存
+        if hashing_kv is not None:
+            await hashing_kv.upsert({args_hash: {"return": result, "model": model}})
+        
+        return result
+    except (aiohttp.ClientError, asyncio.TimeoutError, ollama.ResponseError) as e:
+        # 记录错误并重新抛出以触发重试
+        import logging
+        logging.error(f"Ollama API调用失败: {str(e)}，将进行重试")
+        raise
 
 
 @lru_cache(maxsize=1)
@@ -711,14 +759,34 @@ async def hf_embedding(texts: list[str], tokenizer, embed_model) -> np.ndarray:
         return embeddings.detach().cpu().numpy()
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError, ollama.ResponseError)),
+)
 async def ollama_embedding(texts: list[str], embed_model, **kwargs) -> np.ndarray:
+    # Extract and set timeout parameter, default to 180 seconds for embeddings
+    timeout = kwargs.pop("timeout", 180)
+    host = kwargs.pop("host", None)
+    
+    # Create async client with timeout
+    ollama_client = ollama.AsyncClient(host=host, timeout=timeout)
+    
     embed_text = []
-    ollama_client = ollama.Client(**kwargs)
-    for text in texts:
-        data = ollama_client.embeddings(model=embed_model, prompt=text)
-        embed_text.append(data["embedding"])
-
-    return embed_text
+    try:
+        for text in texts:
+            # Use asyncio.wait_for to add an additional timeout safety layer
+            response = await asyncio.wait_for(
+                ollama_client.embeddings(model=embed_model, prompt=text),
+                timeout=timeout
+            )
+            embed_text.append(response["embedding"])
+        return embed_text
+    except (aiohttp.ClientError, asyncio.TimeoutError, ollama.ResponseError) as e:
+        # Log error and re-raise to trigger retry
+        import logging
+        logging.error(f"Ollama embedding API调用失败: {str(e)}，将进行重试")
+        raise
 
 
 class Model(BaseModel):

@@ -24,10 +24,12 @@ document:
   # 文档分块设置
   chunk_size: 1000
   chunk_overlap: 200
+  # 实体提取设置
+  max_gleaning: 2  # 实体关系提取的最大迭代次数
 
 # 存储配置
 storage:
-  working_dir: "./result/grag_data"
+  working_dir: "./result/grag_data1"
   embedding_batch_num: 32
 
 # 查询配置

@@ -25,6 +25,11 @@ from ..utils.common import (
     process_combine_contexts,
     truncate_list_by_token_size,
     create_progress_bar,
+    set_logger,
+)
+from .entity_extraction import (
+    extract_entities_and_relationships,
+    process_and_store_entities_relationships,
 )
 
 
@@ -175,32 +180,98 @@ class LightRAG:
                 if f'"{keyword}"' not in entity_names:
                     entity_names.append(f'"{keyword}"')
         
-        # 3. Get entity descriptions
-        entity_descriptions = []
+        # 3. 尝试从查询中识别实体类型
+        query_entity_types = self._extract_entity_types_from_query(query, all_keywords)
+        
+        # 4. Get entity descriptions with additional information
+        entity_details = []
         for entity_name in entity_names:
             entity_data = await self.graph_storage.get_node(entity_name)
             if entity_data:
-                entity_descriptions.append(
-                    [
-                        entity_name,
-                        entity_data.get("description", ""),
-                    ]
-                )
+                # 获取实体的id、name、type和description
+                entity_id = entity_data.get("id", "")
+                entity_type = entity_data.get("type", entity_data.get("entity_type", "UNKNOWN"))
+                entity_description = entity_data.get("description", "")
+                
+                # 计算实体类型与查询类型的匹配度
+                type_relevance = 1.0
+                if query_entity_types and entity_type in query_entity_types:
+                    type_relevance = 2.0  # 提高匹配类型的权重
+                
+                entity_details.append({
+                    "name": entity_name,
+                    "id": entity_id,
+                    "type": entity_type,
+                    "description": entity_description,
+                    "relevance": type_relevance  # 用于排序
+                })
+        
+        # 5. 根据类型相关性排序实体
+        entity_details.sort(key=lambda x: x["relevance"], reverse=True)
+# 6. 构建丰富的实体描述
+        entity_descriptions = []
+        for entity in entity_details:
+            entity_name = entity['name'].replace('"', '')
+            formatted_description = (
+                f"[{entity['type']}] {entity_name}: {entity['description']}"
+            )
+            entity_descriptions.append([entity["id"], formatted_description])
 
-        # 4. Truncate descriptions to fit token limit
+        # 7. Truncate descriptions to fit token limit
         truncated_descriptions = truncate_list_by_token_size(
-            entity_descriptions,
-            lambda x: x[0] + x[1],
-            max_token,
+            entity_descriptions, lambda x: x[1], max_token
         )
 
-        # 5. Format as CSV
-        header = ["ID", "Entity Name and Description"]
+        # 8. Format as CSV
+        header = ["ID", "Entity Information"]
         csv_data = [header] + [
-            [str(i + 1), f"{desc[0]}: {desc[1]}"]
+            [str(i + 1), desc[1]]
             for i, desc in enumerate(truncated_descriptions)
         ]
         return list_of_list_to_csv(csv_data)
+    
+    def _extract_entity_types_from_query(self, query: str, keywords: List[str]) -> List[str]:
+        """
+        从查询和关键词中提取可能的实体类型
+        
+        Args:
+            query: 查询字符串
+            keywords: 关键词列表
+            
+        Returns:
+            可能的实体类型列表
+        """
+        entity_types = []
+        
+        # 检查查询中是否包含实体类型相关的词
+        type_keywords = {
+            "组织名称": ["组织", "公司", "机构", "团体", "委员会", "部门"],
+            "个人姓名": ["人", "谁", "名字", "姓名"],
+            "地理位置": ["哪里", "地方", "位置", "地点", "在哪", "哪儿"],
+            "事件": ["事件", "发生", "什么事", "活动"],
+            "时间": ["时间", "何时", "什么时候", "年", "月", "日", "几点"],
+            "职位": ["职位", "职务", "担任", "工作", "岗位"],
+            "金额": ["多少钱", "价格", "费用", "金额", "成本"],
+            "面积": ["多大", "面积", "平方", "亩"],
+            "人数": ["多少人", "人数", "数量", "几个"]
+        }
+        
+        # 检查查询中是否包含类型关键词
+        for entity_type, type_words in type_keywords.items():
+            for word in type_words:
+                if word in query:
+                    entity_types.append(entity_type)
+                    break
+        
+        # 检查关键词中是否包含类型信息
+        for keyword in keywords:
+            for entity_type, type_words in type_keywords.items():
+                for word in type_words:
+                    if word in keyword:
+                        entity_types.append(entity_type)
+                        break
+        
+        return list(set(entity_types))  # 去重
 
     async def _get_global_context(
         self, query: str, keywords: Dict[str, List[str]], top_k: int, max_token: int
@@ -208,7 +279,11 @@ class LightRAG:
         """
         Get global context based on relationship search.
         """
-        # 1. Search for relationships using vector search
+        # 1. 尝试从查询中识别实体类型
+        all_keywords = keywords.get("high_level_keywords", []) + keywords.get("low_level_keywords", [])
+        query_entity_types = self._extract_entity_types_from_query(query, all_keywords)
+        
+        # 2. Search for relationships using vector search
         relationship_results = await self.relationship_vector_storage.query(
             query, top_k=top_k
         )
@@ -216,8 +291,7 @@ class LightRAG:
             (result["src_id"], result["tgt_id"]) for result in relationship_results
         ]
         
-        # 2. Add relationships involving entities from keywords
-        all_keywords = keywords.get("high_level_keywords", []) + keywords.get("low_level_keywords", [])
+        # 3. Add relationships involving entities from keywords
         for keyword in all_keywords:
             keyword_with_quotes = f'"{keyword}"'
             
@@ -230,8 +304,7 @@ class LightRAG:
                         if edge not in relationships:
                             relationships.append(edge)
         
-        # 3. Get all edges from the graph that mention any of the keywords in their description
-        # This is a more comprehensive approach to find all relevant edges
+        # 4. Get all edges from the graph that mention any of the keywords in their description
         try:
             # Get all edges from the graph
             import networkx as nx
@@ -251,29 +324,66 @@ class LightRAG:
         except Exception as e:
             logger.error(f"Error while searching for edges with keyword in description: {e}")
 
-        # 5. Get relationship descriptions
-        relationship_descriptions = []
+        # 5. 获取关系详细信息，包括实体类型和描述
+        relationship_details = []
         for src_id, tgt_id in relationships:
             edge_data = await self.graph_storage.get_edge(src_id, tgt_id)
             if edge_data:
-                relationship_descriptions.append(
-                    [
-                        f"{src_id} -> {tgt_id}",
-                        edge_data.get("description", ""),
-                    ]
-                )
+                # 获取源实体和目标实体的信息
+                src_entity = await self.graph_storage.get_node(src_id)
+                tgt_entity = await self.graph_storage.get_node(tgt_id)
+                
+                src_type = src_entity.get("type", src_entity.get("entity_type", "UNKNOWN")) if src_entity else "UNKNOWN"
+                tgt_type = tgt_entity.get("type", tgt_entity.get("entity_type", "UNKNOWN")) if tgt_entity else "UNKNOWN"
+                
+                # 计算关系与查询类型的相关性
+                type_relevance = 1.0
+                if query_entity_types:
+                    if src_type in query_entity_types or tgt_type in query_entity_types:
+                        type_relevance = 2.0  # 提高匹配类型的权重
+                
+                # 获取关系的关键词和描述
+                keywords = edge_data.get("keywords", "")
+                description = edge_data.get("description", "")
+                
+                relationship_details.append({
+                    "src_id": src_id,
+                    "tgt_id": tgt_id,
+                    "src_type": src_type,
+                    "tgt_type": tgt_type,
+                    "keywords": keywords,
+                    "description": description,
+                    "relevance": type_relevance  # 用于排序
+                })
+        
+        # 6. 根据类型相关性排序关系
+        relationship_details.sort(key=lambda x: x["relevance"], reverse=True)
+        
+        # 7. 构建丰富的关系描述
+        relationship_descriptions = []
+        for rel in relationship_details:
+            src_name = rel["src_id"].replace('"', '')
+            tgt_name = rel["tgt_id"].replace('"', '')
+            formatted_description = (
+                f"[{rel['src_type']}] {src_name} -> [{rel['tgt_type']}] {tgt_name}: "
+                f"{rel['description']} (关键词: {rel['keywords']})"
+            )
+            relationship_descriptions.append([
+                f"{rel['src_id']} -> {rel['tgt_id']}",
+                formatted_description
+            ])
 
-        # 6. Truncate descriptions to fit token limit
+        # 8. Truncate descriptions to fit token limit
         truncated_descriptions = truncate_list_by_token_size(
             relationship_descriptions,
             lambda x: x[0] + x[1],
             max_token,
         )
 
-        # 7. Format as CSV
-        header = ["ID", "Relationship and Description"]
+        # 9. Format as CSV
+        header = ["ID", "Relationship Information"]
         csv_data = [header] + [
-            [str(i + 1), f"{desc[0]}: {desc[1]}"]
+            [str(i + 1), desc[1]]
             for i, desc in enumerate(truncated_descriptions)
         ]
         return list_of_list_to_csv(csv_data)
@@ -378,122 +488,35 @@ class LightRAG:
         """
         logger.info(f"开始从文档 {doc_id} 提取实体和关系")
         
-        # 1. Prepare prompt
-        entity_extraction_prompt = PROMPTS["entity_extraction"].format(
-            entity_types=", ".join(PROMPTS["DEFAULT_ENTITY_TYPES"]),
-            input_text=content,
-            tuple_delimiter=PROMPTS["DEFAULT_TUPLE_DELIMITER"],
-            record_delimiter=PROMPTS["DEFAULT_RECORD_DELIMITER"],
-            completion_delimiter=PROMPTS["DEFAULT_COMPLETION_DELIMITER"],
+        # 1. 提取实体和关系
+        entities, relationships = await extract_entities_and_relationships(
+            content=content,
+            chunk_key=doc_id,
+            llm_model_func=self.llm_model_func,
+            llm_model_kwargs=self.llm_model_kwargs,
+            knowledge_graph_inst=self.graph_storage,
+            entity_vdb=self.entity_vector_storage,
+            relationships_vdb=self.relationship_vector_storage,
+            file_path=doc_id,  # 使用文档ID作为文件路径
+            max_gleaning=1,    # 默认只进行一次额外提取
         )
-
-        # 2. Extract entities and relationships
-        logger.info("正在使用LLM提取实体和关系...")
-        extraction_response = await self.llm_model_func(
-            entity_extraction_prompt, **self.llm_model_kwargs
-        )
-        logger.info("LLM提取完成，开始解析结果")
-
-        # 3. Parse response
-        entities = []
-        relationships = []
-        content_keywords = []
-
-        # Split by record delimiter
-        records = extraction_response.split(PROMPTS["DEFAULT_RECORD_DELIMITER"])
-        total_records = len(records)
-        progress_bar = create_progress_bar(total_records, "解析实体和关系")
         
-        for i, record in enumerate(records):
-            record = record.strip()
-            if not record:
-                progress_bar.update(i+1, "跳过空记录")
-                continue
-
-            # Parse record
-            parts = record.split(PROMPTS["DEFAULT_TUPLE_DELIMITER"])
-            if len(parts) < 2:
-                progress_bar.update(i+1, "跳过无效记录")
-                continue
-
-            record_type = parts[0].strip('(")')
-            if record_type == "entity":
-                if len(parts) >= 5:
-                    entity_type = parts[1].strip()
-                    entity_name = parts[2].strip()
-                    name_type = parts[3].strip()
-                    attributes = parts[4].strip()
-                    entities.append(
-                        {
-                            "entity_type": name_type,
-                            "name": entity_name,
-                            "description": attributes,
-                            "source_id": doc_id,
-                        }
-                    )
-                    progress_bar.update(i+1, f"解析实体: {entity_name}")
-            elif record_type == "relationship":
-                if len(parts) >= 6:
-                    source_entity = parts[1].strip()
-                    target_entity = parts[2].strip()
-                    relationship_description = parts[3].strip()
-                    relationship_keywords = parts[4].strip()
-                    relationship_strength = parts[5].strip().rstrip(")")
-                    try:
-                        strength = float(relationship_strength)
-                    except ValueError:
-                        strength = 5.0  # Default strength
-                    relationships.append(
-                        {
-                            "source": source_entity,
-                            "target": target_entity,
-                            "description": relationship_description,
-                            "keywords": relationship_keywords,
-                            "weight": strength,
-                            "source_id": doc_id,
-                        }
-                    )
-                    progress_bar.update(i+1, f"解析关系: {source_entity} -> {target_entity}")
-            elif record_type == "content_keywords":
-                if len(parts) >= 2:
-                    keywords = parts[1].strip().rstrip(")")
-                    content_keywords.append(keywords)
-                    progress_bar.update(i+1, "解析关键词")
-            else:
-                progress_bar.update(i+1, f"未知记录类型: {record_type}")
+        logger.info(f"提取完成，共 {len(entities)} 个实体和 {len(relationships)} 个关系")
         
-        progress_bar.finish()
-        logger.info(f"解析完成，发现 {len(entities)} 个实体和 {len(relationships)} 个关系")
-
-        # 4. Store entities and relationships
+        # 2. 处理并存储实体和关系
         if entities or relationships:
-            storage_progress = create_progress_bar(
-                len(entities) + len(relationships), 
-                "存储实体和关系"
+            await process_and_store_entities_relationships(
+                entities=entities,
+                relationships=relationships,
+                knowledge_graph_inst=self.graph_storage,
+                entity_vdb=self.entity_vector_storage,
+                relationships_vdb=self.relationship_vector_storage,
+                force_llm_summary_on_merge=6,  # 默认合并阈值
+                llm_model_func=self.llm_model_func,
+                llm_model_kwargs=self.llm_model_kwargs,
             )
             
-            # 存储实体
-            for i, entity in enumerate(entities):
-                await self.graph_storage.upsert_node(entity["name"], entity)
-                storage_progress.update(i+1, f"存储实体: {entity['name']}")
-            
-            # 存储关系
-            offset = len(entities)
-            for i, relationship in enumerate(relationships):
-                await self.graph_storage.upsert_edge(
-                    relationship["source"],
-                    relationship["target"],
-                    {
-                        "description": relationship["description"],
-                        "keywords": relationship["keywords"],
-                        "weight": relationship["weight"],
-                        "source_id": relationship["source_id"],
-                    },
-                )
-                storage_progress.update(offset+i+1, f"存储关系: {relationship['source']} -> {relationship['target']}")
-            
-            storage_progress.finish()
-            logger.info("实体和关系存储完成")
+            logger.info("实体和关系处理与存储完成")
 
     def _split_text(
         self, text: str, chunk_size: int = 1000, chunk_overlap: int = 200

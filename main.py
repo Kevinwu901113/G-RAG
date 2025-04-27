@@ -1,18 +1,18 @@
 import os
-import logging
 import re
 import json
 import asyncio
 import datetime
 import yaml
 from typing import List, Optional, Tuple, Dict, Any, Callable
+import argparse
 
 from grag.core.base import QueryParam
 from grag.rag.lightrag import LightRAG
 from grag.core.llm import ollama_model_complete, ollama_embedding
 from grag.utils.common import wrap_embedding_func_with_attrs, set_logger, create_progress_bar
+from grag.utils.logger_manager import get_logger, configure_logging
 from grag.core.storage import JsonKVStorage, NanoVectorDBStorage, NetworkXStorage
-import argparse
 
 # 加载配置文件
 def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
@@ -46,13 +46,13 @@ if not os.path.exists(WORKING_DIR):
 if not os.path.exists(LOG_DIR):
     os.makedirs(LOG_DIR, exist_ok=True)
 
-# 设置日志文件名（使用当前时间）
-current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-LOG_FILE = os.path.join(LOG_DIR, f"grag_run_{current_time}.log")
+# 配置日志系统
+log_manager = configure_logging(log_dir=LOG_DIR, default_level="info")
+log_manager.log_system_info()
+log_manager.log_config(CONFIG)
 
-# 配置日志
-set_logger(LOG_FILE)
-logger = logging.getLogger("grag")
+# 获取日志器
+logger = get_logger("grag")
 
 
 async def setup_rag() -> LightRAG:
@@ -156,7 +156,7 @@ async def index_documents(rag: LightRAG, file_paths: List[str]) -> None:
     doc_config = CONFIG["document"]
     # 创建进度条
     total_files = len(file_paths)
-    progress_bar = create_progress_bar(total_files, "文档索引进度", LOG_FILE)
+    progress_bar = create_progress_bar(total_files, "文档索引进度")
     
     for i, file_path in enumerate(file_paths):
         file_name = os.path.basename(file_path)
@@ -283,15 +283,14 @@ if __name__ == "__main__":
         if args.demo:
             # 示例查询
             questions = [
-                "这篇文章包含了哪些主题?",
-                "公明区对外经济引进小组是什么时候成立的？",
+                "公明镇镇长有谁担任过?"
             ]
             
             for question in questions:
                 print(f"\n问题: {question}")
                 
                 # 使用不同模式查询
-                for mode in ["local", "global", "hybrid", "naive"]:
+                for mode in ["hybrid"]:
                     print(f"\n模式: {mode}")
                     answer, sources = await query_and_process(rag, question, mode)
                     print(f"回答: {answer}")
@@ -302,22 +301,22 @@ if __name__ == "__main__":
                             print(f"- {source}")
         
         # 交互式查询
-        while True:
-            try:
-                query = input("\n问题 (输入'exit'退出): ")
-                if query.lower() in ['exit', 'quit', '退出']:
-                    break
+        # while True:
+        #     try:
+        #         query = input("\n问题 (输入'exit'退出): ")
+        #         if query.lower() in ['exit', 'quit', '退出']:
+        #             break
                 
-                print(f"模式: {args.mode}")
-                param = QueryParam(mode=args.mode)
-                # 只调用用户指定模式
-                response = await rag.aquery(query, param=param)
-                print("回答:", response)
-            except KeyboardInterrupt:
-                print("\n退出程序")
-                break
-            except Exception as e:
-                print(f"发生错误: {e}")
+        #         print(f"模式: {args.mode}")
+        #         param = QueryParam(mode=args.mode)
+        #         # 只调用用户指定模式
+        #         response = await rag.aquery(query, param=param)
+        #         print("回答:", response)
+        #     except KeyboardInterrupt:
+        #         print("\n退出程序")
+        #         break
+        #     except Exception as e:
+        #         print(f"发生错误: {e}")
     
     # 运行交互式查询
     asyncio.run(run_interactive())

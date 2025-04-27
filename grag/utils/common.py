@@ -17,35 +17,38 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import tiktoken
 
+from .logger_manager import get_logger, configure_logging
+
 ENCODER = None
 
-logger = logging.getLogger("grag")
+# 获取grag日志器
+logger = get_logger("grag")
 
 
 def set_logger(log_file: str):
-    logger.setLevel(logging.DEBUG)
-
-    # 创建文件处理器
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
-
-    # 创建控制台处理器
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-
-    # 设置格式
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-
-    # 清除现有处理器并添加新处理器
-    logger.handlers = []
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+    """
+    配置日志系统
     
-    logger.info(f"日志将被保存到: {log_file}")
+    Args:
+        log_file: 日志文件路径
+    """
+    # 提取日志目录
+    log_dir = os.path.dirname(log_file)
+    if not log_dir:
+        log_dir = "logs"
+    
+    # 使用新的日志管理器
+    log_manager = configure_logging(log_dir=log_dir, default_level="debug")
+    
+    # 创建会话日志文件
+    session_log_file = log_manager.create_session_log_file(prefix="grag")
+    
+    # 记录系统信息
+    log_manager.log_system_info()
+    
+    logger.info(f"日志将被保存到: {session_log_file}")
+    
+    return log_manager
 
 
 @dataclass
@@ -307,7 +310,7 @@ def process_combine_contexts(hl, ll):
 
 class ProgressBar:
     """
-    用于显示进度条的类
+    用于显示进度条的类，简化版本，避免使用ANSI转义序列
     """
     def __init__(self, total: int, prefix: str = '', suffix: str = '', 
                  decimals: int = 1, length: int = 50, fill: str = '█', 
@@ -335,8 +338,6 @@ class ProgressBar:
         self.log_file = log_file
         self.iteration = 0
         self.start_time = time.time()
-        # 保存当前光标位置并移动到底部
-        sys.stdout.write('\x1b[s\x1b[999B\x1b[2K')
         self._print_progress()
     
     def update(self, iteration: Optional[int] = None, suffix: Optional[str] = None):
@@ -359,8 +360,12 @@ class ProgressBar:
     
     def _print_progress(self):
         """打印进度条"""
-        percent = ("{0:." + str(self.decimals) + "f}").format(100 * (self.iteration / float(self.total)))
-        filled_length = int(self.length * self.iteration // self.total)
+        if self.total <= 0:
+            percent = "100.0"
+            filled_length = self.length
+        else:
+            percent = ("{0:." + str(self.decimals) + "f}").format(100 * (self.iteration / float(self.total)))
+            filled_length = int(self.length * self.iteration // self.total)
         bar = self.fill * filled_length + '-' * (self.length - filled_length)
         
         # 计算已用时间和估计剩余时间
@@ -371,10 +376,9 @@ class ProgressBar:
         else:
             time_info = ""
             
-        progress_line = f'\r\033[1G{self.prefix} |{bar}| {percent}% {self.suffix}{time_info}'
+        progress_line = f'\r{self.prefix} |{bar}| {percent}% {self.suffix}{time_info}'
         
         # 打印到控制台
-        sys.stdout.write('\x1b[u\x1b[2K')  # 恢复光标位置并清除行
         sys.stdout.write(progress_line + self.print_end)
         sys.stdout.flush()
         
@@ -392,7 +396,6 @@ class ProgressBar:
         """完成进度条"""
         self.update(self.total)
         # 打印换行符，使下一行输出从新行开始
-        sys.stdout.write('\x1b[u')  # 恢复光标位置
         sys.stdout.write('\n')
         sys.stdout.flush()
         

@@ -7,7 +7,7 @@ PROMPTS["DEFAULT_RECORD_DELIMITER"] = "##"
 PROMPTS["DEFAULT_COMPLETION_DELIMITER"] = "<|COMPLETE|>"
 PROMPTS["process_tickers"] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
-PROMPTS["DEFAULT_ENTITY_TYPES"] = ["组织名称", "个人姓名", "地理位置", "事件","时间","职位","金额","面积","人数"]
+PROMPTS["DEFAULT_ENTITY_TYPES"] = ["组织名称", "个人姓名", "地理位置", "事件", "时间", "职位", "金额", "面积", "人数", "政策法规", "产品", "技术", "行业", "学历", "证书", "奖项", "联系方式"]
 
 PROMPTS["entity_extraction"] = """
 -目标活动-
