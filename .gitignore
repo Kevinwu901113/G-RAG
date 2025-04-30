@@ -95,3 +95,6 @@ dmypy.json
 
 example/
 logs/
+1/
+examples/
+data_translate/

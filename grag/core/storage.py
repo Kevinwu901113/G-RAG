@@ -54,9 +54,11 @@ class JsonKVStorage(BaseKVStorage):
         return set([s for s in data if s not in self._data])
 
     async def upsert(self, data: dict[str, dict]):
-        left_data = {k: v for k, v in data.items() if k not in self._data}
-        self._data.update(left_data)
-        return left_data
+        # 更新所有数据，包括已存在的键
+        self._data.update(data)
+        # 保存更新后的数据到文件
+        write_json(self._data, self._file_name)
+        return data
 
     async def drop(self):
         self._data = {}
@@ -264,11 +266,19 @@ class NetworkXStorage(BaseGraphStorage):
         return None
 
     async def upsert_node(self, node_id: str, node_data: dict[str, str]):
+        # 确保节点ID格式正确，HotpotQA数据中的实体名称可能不带引号
+        if not node_id.startswith('"') and not node_id.endswith('"'):
+            node_id = f'"{node_id}"'
         self._graph.add_node(node_id, **node_data)
 
     async def upsert_edge(
         self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]
     ):
+        # 确保源节点和目标节点ID格式正确，HotpotQA数据中的实体名称可能不带引号
+        if not source_node_id.startswith('"') and not source_node_id.endswith('"'):
+            source_node_id = f'"{source_node_id}"'
+        if not target_node_id.startswith('"') and not target_node_id.endswith('"'):
+            target_node_id = f'"{target_node_id}"'
         self._graph.add_edge(source_node_id, target_node_id, **edge_data)
 
     async def delete_node(self, node_id: str):

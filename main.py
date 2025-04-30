@@ -13,6 +13,8 @@ from grag.core.llm import ollama_model_complete, ollama_embedding
 from grag.utils.common import wrap_embedding_func_with_attrs, set_logger, create_progress_bar
 from grag.utils.logger_manager import get_logger, configure_logging
 from grag.core.storage import JsonKVStorage, NanoVectorDBStorage, NetworkXStorage
+from grag.utils.file_scanner import scan_data_directory
+from grag.rag.hotpotqa_processor import process_hotpotqa_dataset
 
 # 加载配置文件
 def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
@@ -144,19 +146,25 @@ async def setup_rag() -> LightRAG:
     return rag
 
 
-async def index_documents(rag: LightRAG, file_paths: List[str]) -> None:
+async def index_documents(rag: LightRAG, file_paths: List[str]) -> Dict[str, List[Dict[str, Any]]]:
     """
     索引文档到RAG系统
     
     Args:
         rag: LightRAG实例
         file_paths: 文档文件路径列表
+        
+    Returns:
+        问答对字典，按文档ID分组
     """
     # 获取文档处理配置
     doc_config = CONFIG["document"]
     # 创建进度条
     total_files = len(file_paths)
     progress_bar = create_progress_bar(total_files, "文档索引进度")
+    
+    # 存储问答对
+    qa_pairs_by_doc = {}
     
     for i, file_path in enumerate(file_paths):
         file_name = os.path.basename(file_path)
@@ -167,32 +175,57 @@ async def index_documents(rag: LightRAG, file_paths: List[str]) -> None:
         if file_path.endswith('.txt'):
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
+            # 索引文档
+            doc_id = await rag.index_document(
+                content, 
+                chunk_size=doc_config["chunk_size"], 
+                chunk_overlap=doc_config["chunk_overlap"]
+            )
+            logger.info(f"文档已索引，ID: {doc_id}")
+            qa_pairs_by_doc[doc_id] = []
+            
         elif file_path.endswith('.docx'):
             # 使用unstructured库处理docx文件
             try:
                 from unstructured.partition.docx import partition_docx
                 elements = partition_docx(file_path)
                 content = "\n".join([str(e) for e in elements])
+                # 索引文档
+                doc_id = await rag.index_document(
+                    content, 
+                    chunk_size=doc_config["chunk_size"], 
+                    chunk_overlap=doc_config["chunk_overlap"]
+                )
+                logger.info(f"文档已索引，ID: {doc_id}")
+                qa_pairs_by_doc[doc_id] = []
             except ImportError:
                 logger.error("请安装unstructured库以处理docx文件: pip install unstructured")
                 progress_bar.update(i+1, f"跳过 {file_name} (缺少unstructured库)")
+                continue
+                
+        elif file_path.endswith('.json'):
+            # 处理HotpotQA数据集
+            try:
+                doc_id, qa_pairs = await process_hotpotqa_dataset(rag, file_path)
+                if doc_id:
+                    logger.info(f"HotpotQA数据集已索引，ID: {doc_id}，问答对数量: {len(qa_pairs)}")
+                    qa_pairs_by_doc[doc_id] = qa_pairs
+                else:
+                    logger.warning(f"处理HotpotQA数据集失败: {file_path}")
+            except Exception as e:
+                logger.error(f"处理JSON文件时出错: {e}")
+                progress_bar.update(i+1, f"跳过 {file_name} (处理错误)")
                 continue
         else:
             logger.warning(f"不支持的文件类型: {file_path}")
             progress_bar.update(i+1, f"跳过 {file_name} (不支持的文件类型)")
             continue
         
-        # 索引文档
-        doc_id = await rag.index_document(
-            content, 
-            chunk_size=doc_config["chunk_size"], 
-            chunk_overlap=doc_config["chunk_overlap"]
-        )
-        logger.info(f"文档已索引，ID: {doc_id}")
         progress_bar.update(i+1, f"完成 {file_name}")
     
     # 完成进度条
     progress_bar.finish()
+    return qa_pairs_by_doc
 
 
 async def query_and_process(
@@ -249,6 +282,39 @@ async def query_and_process(
     return answer, sources
 
 
+async def scan_and_index_data_directory(rag: LightRAG, data_dir: str = "data") -> Dict[str, List[Dict[str, Any]]]:
+    """
+    扫描数据目录并索引所有支持的文件
+    
+    Args:
+        rag: LightRAG实例
+        data_dir: 数据目录路径
+        
+    Returns:
+        问答对字典，按文档ID分组
+    """
+    logger.info(f"开始扫描数据目录: {data_dir}")
+    
+    # 扫描数据目录
+    file_types = scan_data_directory(data_dir)
+    
+    # 合并所有文件路径
+    all_files = []
+    for file_type, files in file_types.items():
+        if file_type != "other":  # 跳过不支持的文件类型
+            all_files.extend(files)
+    
+    if not all_files:
+        logger.warning(f"数据目录 {data_dir} 中没有找到支持的文件")
+        return {}
+    
+    # 索引所有文件
+    logger.info(f"开始索引 {len(all_files)} 个文件")
+    qa_pairs_by_doc = await index_documents(rag, all_files)
+    
+    return qa_pairs_by_doc
+
+
 async def main():
     """主函数 - 已弃用，保留仅作参考"""
     # 此函数已被run_interactive()替代
@@ -267,17 +333,17 @@ if __name__ == "__main__":
         # 设置RAG系统
         rag = await setup_rag()
         
-        # 索引文档
+        # 自动扫描并索引数据目录中的所有支持文件
         data_folder = './data'
-        if os.path.exists(data_folder):
-            file_paths = []
-            for root, dirs, files in os.walk(data_folder):
-                for file in files:
-                    if file.endswith(('.txt', '.docx')):
-                        file_paths.append(os.path.join(root, file))
-            
-            if file_paths:
-                await index_documents(rag, file_paths)
+        qa_pairs = await scan_and_index_data_directory(rag, data_folder)
+        
+        # 保存问答对到文件，用于后续评估
+        if qa_pairs:
+            qa_file_path = os.path.join(WORKING_DIR, "qa_pairs.json")
+            with open(qa_file_path, "w", encoding="utf-8") as f:
+                json.dump(qa_pairs, f, ensure_ascii=False, indent=2)
+            logger.info(f"问答对已保存到 {qa_file_path}")
+            print(f"问答对已保存到 {qa_file_path}")
         
         # 如果指定了demo参数，运行演示问题
         if args.demo:
