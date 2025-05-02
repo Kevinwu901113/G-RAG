@@ -646,7 +646,7 @@ async def main():
     parser.add_argument("--timeout", "-t", type=int, default=60, help="请求超时时间（秒）")
     parser.add_argument("--batch", "-b", type=int, default=1, help="批处理大小")
     parser.add_argument("--openai-model", default="deepseek-chat", help="OpenAI模型名称")
-    parser.add_argument("--openai-api-key", default="sk-f3333bd9b06a4fa6b1520f06c010c736", help="OpenAI API密钥")
+    parser.add_argument("--openai-api-key", default="sk-", help="OpenAI API密钥")
     parser.add_argument("--openai-base-url", default="https://api.deepseek.com", help="OpenAI API基础URL")
     parser.add_argument("--max-concurrency", type=int, default=5, help="OpenAI API最大并发请求数量")
     args = parser.parse_args()
