@@ -9,6 +9,19 @@ llm:
   options:
     num_ctx: 32768
 
+document:
+  input_dir: "./data"  # 文档存放目录
+  output_graph_path: "./result/grag_data1/graph.json"  # 输出图结构路径
+  chunk_size: 1000
+  chunk_overlap: 200
+  max_gleaning: 2
+
+#剪枝和分类器开启
+classifier:
+  enable: true
+prune:
+  enable: true
+
 # 嵌入模型配置
 embedding:
   # 嵌入模型提供商和名称

@@ -263,7 +263,7 @@ class DocumentProcessor:
         # 保存图结构
         graph_file = os.path.join(self.working_dir, "graph_structure.json")
         try:
-            graph_data = self.rag.graph_storage.export_graph_data()
+            graph_data = await self.rag.graph_storage.export_graph_data()
             with open(graph_file, "w", encoding="utf-8") as f:
                 json.dump(graph_data, f, ensure_ascii=False, indent=2)
             logger.info(f"图结构已保存到 {graph_file}")

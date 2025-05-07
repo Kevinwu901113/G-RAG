@@ -153,6 +153,38 @@ class PrunerManager:
         """
         if not os.path.exists(self.model_path):
             logger.warning(f"找不到剪枝模型: {self.model_path}")
+            
+            # 尝试自动训练模型
+            logger.info("尝试自动训练剪枝模型...")
+            try:
+                import sys
+                import subprocess
+                from pathlib import Path
+                
+                # 获取train_pruner.py脚本路径
+                script_path = Path(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) / "scripts" / "train_pruner.py"
+                
+                if script_path.exists():
+                    # 准备命令行参数
+                    config_path = self.config.get("config_path", "config.yaml")
+                    
+                    # 执行训练脚本
+                    cmd = [sys.executable, str(script_path), "--config", config_path, "--output_path", self.model_path]
+                    
+                    logger.info(f"执行命令: {' '.join(cmd)}")
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    
+                    if result.returncode == 0:
+                        logger.info(f"已自动训练缺失模型并保存至: {self.model_path}")
+                        # 重新尝试加载模型
+                        return self.load_model()
+                    else:
+                        logger.error(f"自动训练剪枝模型失败: {result.stderr}")
+                else:
+                    logger.error(f"找不到训练脚本: {script_path}")
+            except Exception as e:
+                logger.error(f"自动训练剪枝模型时出错: {str(e)}")
+            
             return False
         
         try:

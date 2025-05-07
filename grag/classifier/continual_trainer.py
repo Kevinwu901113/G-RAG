@@ -204,6 +204,87 @@ class ContinualTrainer:
             logger.error(f"备份模型时出错: {str(e)}")
             raise
     
+    def train(self, train_data_path: str) -> bool:
+        """
+        训练查询分类器模型
+        
+        Args:
+            train_data_path: 训练数据路径
+            
+        Returns:
+            是否成功训练模型
+        """
+        if not os.path.exists(train_data_path):
+            logger.error(f"找不到训练数据: {train_data_path}")
+            return False
+            
+        try:
+            # 加载训练数据
+            with open(train_data_path, "r", encoding="utf-8") as f:
+                train_data = json.load(f)
+                
+            if not train_data or not isinstance(train_data, list):
+                logger.error("训练数据格式不正确，应为JSON数组")
+                return False
+                
+            # 提取查询和标签
+            queries = [item.get("query", "") for item in train_data if "query" in item]
+            labels = [item.get("label", "") for item in train_data if "label" in item]
+            
+            if len(queries) != len(labels) or len(queries) == 0:
+                logger.error(f"训练数据不完整: {len(queries)} 个查询, {len(labels)} 个标签")
+                return False
+                
+
+            # 创建并训练分类器
+            from ..rag.query_classifier import train_model
+            
+            # 使用train_model函数直接训练模型
+            logger.info(f"开始训练分类器，使用 {len(queries)} 个样本")
+            # 将训练数据保存为临时文件
+            temp_data_path = os.path.join(os.path.dirname(self.model_path), "temp_train_data.jsonl")
+            os.makedirs(os.path.dirname(temp_data_path), exist_ok=True)
+            
+            with open(temp_data_path, "w", encoding="utf-8") as f:
+                for query, label in zip(queries, labels):
+                    # 解析标签，假设label格式为"query_strategy:precision_required"
+                    parts = label.split(":")
+                    query_strategy = parts[0] if len(parts) > 0 else "noRAG"
+                    precision_required = parts[1] if len(parts) > 1 else "no"
+                    
+                    # 确保标签值有效
+                    if query_strategy not in LABEL_MAPS["query_strategy"]:
+                        query_strategy = "noRAG"
+                    if precision_required not in LABEL_MAPS["precision_required"]:
+                        precision_required = "no"
+                    
+                    f.write(json.dumps({"query": query, "query_strategy": query_strategy, "precision_required": precision_required}) + "\n")
+            
+            # 训练模型
+            # 获取本地模型路径配置
+            config = getattr(self, 'config', {})
+            local_model_path = config.get("local_model_path", None)
+            model_name = config.get("model_name", "bert-base-uncased")
+            logger.info(f"使用模型名称: {model_name}, 本地模型路径: {local_model_path}")
+            train_model(temp_data_path, self.model_path, model_name=model_name, local_model_path=local_model_path)
+            
+            # 模型已由train_model函数保存，无需再次保存
+            # 清理临时文件
+            if os.path.exists(temp_data_path):
+                try:
+                    os.remove(temp_data_path)
+                    logger.info(f"已清理临时训练数据文件: {temp_data_path}")
+                except Exception as e:
+                    logger.warning(f"清理临时文件时出错: {str(e)}")
+                
+            logger.info(f"分类器训练完成，模型已保存到: {self.model_path}")
+            return True
+        except Exception as e:
+            logger.error(f"训练分类器时出错: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+            
     def run_continual_learning(self):
         """
         运行持续学习过程

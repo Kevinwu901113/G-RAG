@@ -155,6 +155,9 @@ class NanoVectorDBStorage(BaseVectorStorage):
             logger.error(
                 f"Error while deleting relations for entity {entity_name}: {e}"
             )
+    
+    async def optimize(self):
+        logger.warning("NanoVectorDBStorage does not support optimization. Skipping optimize step.")
 
     async def index_done_callback(self):
         self._client.save()
@@ -309,3 +312,24 @@ class NetworkXStorage(BaseGraphStorage):
 
         nodes_ids = [self._graph.nodes[node_id]["id"] for node_id in nodes]
         return embeddings, nodes_ids
+        
+    async def export_graph_data(self):
+        """将图结构导出为可序列化的JSON格式
+        
+        Returns:
+            dict: 包含节点和边信息的字典
+        """
+        nodes = []
+        for node_id, node_data in self._graph.nodes(data=True):
+            nodes.append({"id": node_id, **node_data})
+            
+        edges = []
+        for source, target, edge_data in self._graph.edges(data=True):
+            edges.append({"source": source, "target": target, **edge_data})
+            
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "node_count": self._graph.number_of_nodes(),
+            "edge_count": self._graph.number_of_edges()
+        }

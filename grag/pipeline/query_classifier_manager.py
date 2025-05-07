@@ -14,7 +14,7 @@ import pickle
 import asyncio
 from typing import Dict, List, Any, Optional, Tuple, Union
 
-from ..rag.query_classifier import QueryClassifier
+from ..rag.query_classifier import QueryClassifier, LABEL_MAPS
 from ..rag.query_classifier_integration import QueryClassifierIntegration
 from ..utils.logger_manager import get_logger
 from ..utils.common import create_progress_bar
@@ -61,6 +61,53 @@ class QueryClassifierManager:
         """
         if not os.path.exists(self.model_path):
             logger.warning(f"找不到分类器模型: {self.model_path}")
+            
+            # 尝试自动训练模型
+            logger.info("尝试自动训练查询分类器模型...")
+            try:
+                from ..classifier.continual_trainer import ContinualTrainer
+                
+                # 创建训练器实例
+                trainer = ContinualTrainer(
+                    config_path=None,  # 使用默认配置
+                    model_path=self.model_path,
+                    backup_model_dir=os.path.join(self.model_dir, "backups")
+                )
+                
+                # 获取默认训练数据路径
+                default_train_data = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                    "train_data", "default_query_samples.json"
+                )
+                
+                # 如果默认训练数据不存在，尝试使用配置中指定的路径
+                if not os.path.exists(default_train_data):
+                    default_train_data = self.classifier_config.get("default_train_data", "")
+                
+                if os.path.exists(default_train_data):
+                    # 获取模型配置
+                    local_model_path = self.classifier_config.get("local_model_path", None)
+                    model_name = self.classifier_config.get("model_name", "bert-base-uncased")
+                    
+                    # 设置训练器配置
+                    trainer.config = {
+                        "local_model_path": local_model_path,
+                        "model_name": model_name
+                    }
+                    
+                    # 执行训练
+                    success = trainer.train(default_train_data)
+                    if success:
+                        logger.info(f"已自动训练缺失模型并保存至: {self.model_path}")
+                        # 重新尝试加载模型
+                        return self.load_model()
+                    else:
+                        logger.error("自动训练查询分类器模型失败")
+                else:
+                    logger.error(f"找不到默认训练数据: {default_train_data}")
+            except Exception as e:
+                logger.error(f"自动训练查询分类器模型时出错: {str(e)}")
+            
             return False
         
         try:
@@ -112,20 +159,43 @@ class QueryClassifierManager:
                 logger.error(f"训练数据不完整: {len(queries)} 个查询, {len(labels)} 个标签")
                 return False
             
-            # 创建分类器
-            self.classifier = QueryClassifier(
-                model_type=self.classifier_config.get("model_type", "svm"),
-                embedding_model=self.classifier_config.get("embedding_model", "all-MiniLM-L6-v2"),
-                use_cached_embeddings=self.classifier_config.get("use_cached_embeddings", True)
-            )
+            # 使用train_model函数直接训练模型
+            from ..rag.query_classifier import train_model
             
-            # 训练分类器
+            # 将训练数据保存为临时文件
+            temp_data_path = os.path.join(os.path.dirname(self.model_path), "temp_train_data.jsonl")
+            os.makedirs(os.path.dirname(temp_data_path), exist_ok=True)
+            
+            with open(temp_data_path, "w", encoding="utf-8") as f:
+                for query, label in zip(queries, labels):
+                    # 解析标签，假设label格式为"query_strategy:precision_required"
+                    parts = label.split(":")
+                    query_strategy = parts[0] if len(parts) > 0 else "noRAG"
+                    precision_required = parts[1] if len(parts) > 1 else "no"
+                    
+                    # 确保标签值有效
+                    if query_strategy not in LABEL_MAPS["query_strategy"]:
+                        query_strategy = "noRAG"
+                    if precision_required not in LABEL_MAPS["precision_required"]:
+                        precision_required = "no"
+                    
+                    f.write(json.dumps({"query": query, "query_strategy": query_strategy, "precision_required": precision_required}) + "\n")
+            
+            # 训练模型
             logger.info(f"开始训练分类器，使用 {len(queries)} 个样本")
-            self.classifier.train(queries, labels)
+            train_model(temp_data_path, self.model_path)
             
-            # 保存模型
-            with open(self.model_path, "wb") as f:
-                pickle.dump(self.classifier, f)
+            # 清理临时文件
+            if os.path.exists(temp_data_path):
+                try:
+                    os.remove(temp_data_path)
+                    logger.info(f"已清理临时训练数据文件: {temp_data_path}")
+                except Exception as e:
+                    logger.warning(f"清理临时文件时出错: {str(e)}")
+            
+            # 加载训练好的模型
+            with open(self.model_path, "rb") as f:
+                self.classifier = pickle.load(f)
             
             # 创建分类器集成
             self.classifier_integration = QueryClassifierIntegration(

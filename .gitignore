@@ -98,3 +98,6 @@ logs/
 1/
 examples/
 data_translate/
+test_model_output/
+model_backups/
+train_data/
