@@ -104,6 +104,9 @@ class OpenAITranslationStrategy(TranslationStrategy):
         self.max_concurrency = max_concurrency
         self.semaphore = asyncio.Semaphore(max_concurrency)
         
+        # 翻译缓存，用于避免重复翻译相同的文本
+        self.translation_cache = {}
+        
         # 设置API密钥
         if api_key:
             os.environ["OPENAI_API_KEY"] = api_key
@@ -120,6 +123,13 @@ class OpenAITranslationStrategy(TranslationStrategy):
         Returns:
             翻译后的文本
         """
+        # 生成缓存键（使用文本和系统提示的组合）
+        cache_key = f"{text}:{system_prompt}"
+        
+        # 检查缓存中是否已有翻译结果
+        if cache_key in self.translation_cache:
+            return self.translation_cache[cache_key]
+            
         # 创建OpenAI客户端
         openai_client = AsyncOpenAI() if self.base_url is None else AsyncOpenAI(base_url=self.base_url)
         
@@ -137,7 +147,10 @@ class OpenAITranslationStrategy(TranslationStrategy):
                         ),
                         timeout=timeout
                     )
-                return response.choices[0].message.content
+                result = response.choices[0].message.content
+                # 将结果存入缓存
+                self.translation_cache[cache_key] = result
+                return result
             except Exception as e:
                 logger.warning(f"OpenAI翻译失败（第{retry+1}次尝试）: {str(e)}")
                 if retry < max_retries - 1:
@@ -173,8 +186,31 @@ class OpenAITranslationStrategy(TranslationStrategy):
         Returns:
             翻译后的文本列表
         """
-        tasks = [self._translate_single(text, system_prompt, max_retries, timeout) for text in texts]
-        return await asyncio.gather(*tasks)
+        # 检查缓存，只对未缓存的文本创建任务
+        results = [None] * len(texts)
+        tasks = []
+        task_indices = []
+        
+        for i, text in enumerate(texts):
+            cache_key = f"{text}:{system_prompt}"
+            if cache_key in self.translation_cache:
+                # 如果在缓存中找到，直接使用缓存结果
+                results[i] = self.translation_cache[cache_key]
+            else:
+                # 否则创建翻译任务
+                tasks.append(self._translate_single(text, system_prompt, max_retries, timeout))
+                task_indices.append(i)
+        
+        # 如果有需要翻译的文本，执行批量翻译
+        if tasks:
+            # 使用gather并发执行所有任务
+            task_results = await asyncio.gather(*tasks)
+            
+            # 将结果放回对应位置
+            for task_idx, result in zip(task_indices, task_results):
+                results[task_idx] = result
+        
+        return results
 
 
 class HotpotQATranslator:
@@ -193,6 +229,7 @@ class HotpotQATranslator:
         openai_api_key: str = None,
         openai_base_url: str = None,
         max_concurrency: int = 5,
+        cache_file: str = "translation_cache.json",
     ):
         """初始化翻译器
 
@@ -208,6 +245,7 @@ class HotpotQATranslator:
             openai_api_key: OpenAI API密钥
             openai_base_url: OpenAI API基础URL
             max_concurrency: OpenAI API最大并发请求数量
+            cache_file: 翻译缓存文件路径
         """
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
@@ -216,6 +254,7 @@ class HotpotQATranslator:
         self.max_retries = max_retries
         self.timeout = timeout
         self.batch_size = batch_size
+        self.cache_file = Path(cache_file)
         
         # 初始化翻译策略
         self.ollama_strategy = OllamaTranslationStrategy(model_name, host)
@@ -223,6 +262,9 @@ class HotpotQATranslator:
 
         # 确保输出目录存在
         self.output_dir.mkdir(exist_ok=True, parents=True)
+        
+        # 加载翻译缓存
+        self._load_translation_cache()
 
     def is_chinese_text(self, text: str) -> bool:
         """检测文本是否为中文
@@ -261,7 +303,7 @@ class HotpotQATranslator:
         """
         now = datetime.datetime.now().time()
         start_time = datetime.time(0, 30)  # 00:30
-        end_time = datetime.time(8, 30)    # 08:30
+        end_time = datetime.time(0, 30)    # 08:30
         
         # 判断当前时间是否在指定范围内
         if start_time <= now <= end_time:
@@ -291,6 +333,10 @@ class HotpotQATranslator:
         Returns:
             翻译后的中文文本
         """
+        # 检查缓存中是否已有翻译结果
+        if text in self._translation_cache:
+            return self._translation_cache[text]
+            
         system_prompt = "你是一个专业的英译中翻译助手，请将以下英文文本翻译成中文，保持原文的意思和风格，只返回翻译结果，不要添加任何解释或额外内容。"
         
         # 获取当前应该使用的翻译策略
@@ -310,8 +356,44 @@ class HotpotQATranslator:
             # 再次使用当前策略进行翻译
             translated_text = await strategy.translate(text, enhanced_prompt, self.max_retries, self.timeout)
         
+        # 将结果添加到缓存
+        self._translation_cache[text] = translated_text
+        
         return translated_text
         
+    # 翻译缓存字典
+    _translation_cache = {}
+    
+    def _load_translation_cache(self):
+        """从文件加载翻译缓存"""
+        if self.cache_file.exists():
+            try:
+                with open(self.cache_file, "r", encoding="utf-8") as f:
+                    self._translation_cache = json.load(f)
+                logger.info(f"已从{self.cache_file}加载{len(self._translation_cache)}条翻译缓存")
+            except Exception as e:
+                logger.warning(f"加载翻译缓存失败: {str(e)}")
+                self._translation_cache = {}
+        else:
+            logger.info(f"未找到缓存文件{self.cache_file}，将创建新的翻译缓存")
+            self._translation_cache = {}
+    
+    def _save_translation_cache(self):
+        """将翻译缓存保存到文件"""
+        try:
+            # 限制缓存大小，避免文件过大
+            if len(self._translation_cache) > 100000:
+                logger.warning(f"翻译缓存过大({len(self._translation_cache)}条)，将只保留最新的100000条")
+                # 转换为列表，保留最新的10万条
+                cache_items = list(self._translation_cache.items())
+                self._translation_cache = dict(cache_items[-100000:])
+            
+            with open(self.cache_file, "w", encoding="utf-8") as f:
+                json.dump(self._translation_cache, f, ensure_ascii=False)
+            logger.info(f"已将{len(self._translation_cache)}条翻译缓存保存到{self.cache_file}")
+        except Exception as e:
+            logger.error(f"保存翻译缓存失败: {str(e)}")
+    
     async def translate_texts_batch(self, texts: List[str], max_chinese_retries: int = 2) -> List[str]:
         """批量翻译多个文本，根据时间自动选择翻译策略
 
@@ -324,6 +406,23 @@ class HotpotQATranslator:
         """
         if not texts:
             return []
+        
+        # 检查全局翻译缓存
+        results = [None] * len(texts)
+        texts_to_translate = []
+        text_indices = []
+        
+        # 先检查缓存
+        for i, text in enumerate(texts):
+            if text in self._translation_cache:
+                results[i] = self._translation_cache[text]
+            else:
+                texts_to_translate.append(text)
+                text_indices.append(i)
+        
+        # 如果所有文本都在缓存中，直接返回结果
+        if not texts_to_translate:
+            return results
             
         system_prompt = "你是一个专业的英译中翻译助手，请将以下英文文本翻译成中文，保持原文的意思和风格，只返回翻译结果，不要添加任何解释或额外内容。"
         
@@ -333,7 +432,7 @@ class HotpotQATranslator:
         # 如果是OpenAI策略且支持批量翻译
         if isinstance(strategy, OpenAITranslationStrategy) and hasattr(strategy, 'translate_batch'):
             # 执行批量翻译
-            translated_texts = await strategy.translate_batch(texts, system_prompt, self.max_retries, self.timeout)
+            translated_texts = await strategy.translate_batch(texts_to_translate, system_prompt, self.max_retries, self.timeout)
             
             # 检查每个翻译结果是否为中文，如果不是则单独重试
             for i, translated_text in enumerate(translated_texts):
@@ -345,12 +444,30 @@ class HotpotQATranslator:
                     enhanced_prompt = "你是一个专业的英译中翻译助手。请将以下英文文本翻译成中文，必须使用中文字符，不要保留英文单词。保持原文的意思和风格，只返回翻译结果。"
                     
                     # 单独重试这一个文本
-                    translated_texts[i] = await strategy.translate(texts[i], enhanced_prompt, self.max_retries, self.timeout)
+                    translated_texts[i] = await strategy.translate(texts_to_translate[i], enhanced_prompt, self.max_retries, self.timeout)
+                
+                # 将结果添加到缓存
+                self._translation_cache[texts_to_translate[i]] = translated_texts[i]
             
-            return translated_texts
+            # 将翻译结果放回原位置
+            for idx, result in zip(text_indices, translated_texts):
+                results[idx] = result
+                
+            return results
         else:
             # 如果不支持批量翻译，则单独翻译每个文本
-            return [await self.translate_text(text, max_chinese_retries) for text in texts]
+            translated_texts = []
+            for text in texts_to_translate:
+                translated_text = await self.translate_text(text, max_chinese_retries)
+                # 添加到缓存
+                self._translation_cache[text] = translated_text
+                translated_texts.append(translated_text)
+            
+            # 将翻译结果放回原位置
+            for idx, result in zip(text_indices, translated_texts):
+                results[idx] = result
+                
+            return results
 
     async def translate_item(self, item: Dict[str, Any]) -> Dict[str, Any]:
         """翻译单个HotpotQA条目
@@ -363,66 +480,70 @@ class HotpotQATranslator:
         """
         translated_item = item.copy()
 
-        # 翻译问题和答案（可以一起并发处理）
-        texts_to_translate = []
+        # 收集所有需要翻译的文本，包括问题、答案和上下文
+        all_texts_to_translate = []
+        text_mapping = {}  # 用于记录文本在原始数据中的位置
+        
+        # 收集问题和答案
         if "question" in item and item["question"]:
-            texts_to_translate.append(("question", item["question"]))
+            text_id = len(all_texts_to_translate)
+            all_texts_to_translate.append(item["question"])
+            text_mapping[text_id] = ("question", None, None)
             translated_item["question_en"] = item["question"]  # 保留英文原文
             
         if "answer" in item and item["answer"]:
-            texts_to_translate.append(("answer", item["answer"]))
+            text_id = len(all_texts_to_translate)
+            all_texts_to_translate.append(item["answer"])
+            text_mapping[text_id] = ("answer", None, None)
             translated_item["answer_en"] = item["answer"]  # 保留英文原文
-            
-        # 如果有问题或答案需要翻译，则并发处理
-        if texts_to_translate:
-            # 提取文本列表
-            text_list = [item[1] for item in texts_to_translate]
-            
-            # 使用批量翻译方法
-            translated_texts = await self.translate_texts_batch(text_list)
-            
-            # 将翻译结果放回原位置
-            for i, (key, _) in enumerate(texts_to_translate):
-                translated_item[key] = translated_texts[i]
-
-        # 翻译上下文
+        
+        # 收集上下文中的标题和句子
         if "context" in item and isinstance(item["context"], list):
+            translated_item["context_en"] = item["context"]  # 保留英文原文
             translated_context = []
-            for title_sentences in item["context"]:
+            
+            for ctx_idx, title_sentences in enumerate(item["context"]):
                 if len(title_sentences) == 2:
                     title = title_sentences[0]
                     sentences = title_sentences[1]
                     
-                    # 翻译标题
-                    translated_title = await self.translate_text(title)
+                    # 添加标题到翻译列表
+                    text_id = len(all_texts_to_translate)
+                    all_texts_to_translate.append(title)
+                    text_mapping[text_id] = ("context_title", ctx_idx, None)
                     
-                    # 收集需要翻译的句子（过滤空句子）
-                    sentences_to_translate = []
-                    sentence_indices = []
-                    for i, sentence in enumerate(sentences):
+                    # 添加句子到翻译列表（过滤空句子）
+                    for sent_idx, sentence in enumerate(sentences):
                         if sentence.strip():
-                            sentences_to_translate.append(sentence)
-                            sentence_indices.append(i)
+                            text_id = len(all_texts_to_translate)
+                            all_texts_to_translate.append(sentence)
+                            text_mapping[text_id] = ("context_sentence", ctx_idx, sent_idx)
                     
-                    # 初始化翻译后的句子列表
-                    translated_sentences = [""] * len(sentences)
-                    
-                    # 如果有句子需要翻译
-                    if sentences_to_translate:
-                        # 使用批量翻译方法
-                        translated_batch = await self.translate_texts_batch(sentences_to_translate)
-                        
-                        # 将翻译结果放回原位置
-                        for i, idx in enumerate(sentence_indices):
-                            translated_sentences[idx] = translated_batch[i]
-                    
-                    translated_context.append([translated_title, translated_sentences])
+                    # 为这个上下文项创建占位符
+                    translated_context.append([None, [None] * len(sentences)])
                 else:
                     # 保持原样
                     translated_context.append(title_sentences)
             
             translated_item["context"] = translated_context
-            translated_item["context_en"] = item["context"]  # 保留英文原文
+        
+        # 如果有文本需要翻译，则批量翻译
+        if all_texts_to_translate:
+            # 使用批量翻译方法一次性翻译所有文本
+            all_translated_texts = await self.translate_texts_batch(all_texts_to_translate)
+            
+            # 将翻译结果放回原位置
+            for text_id, translated_text in enumerate(all_translated_texts):
+                text_type, ctx_idx, sent_idx = text_mapping[text_id]
+                
+                if text_type == "question":
+                    translated_item["question"] = translated_text
+                elif text_type == "answer":
+                    translated_item["answer"] = translated_text
+                elif text_type == "context_title":
+                    translated_item["context"][ctx_idx][0] = translated_text
+                elif text_type == "context_sentence":
+                    translated_item["context"][ctx_idx][1][sent_idx] = translated_text
 
         return translated_item
 
@@ -633,6 +754,11 @@ class HotpotQATranslator:
 
         for json_file in json_files:
             await self.translate_file(json_file)
+            # 每翻译完一个文件就保存一次缓存
+            self._save_translation_cache()
+            
+        # 翻译完成后再次保存缓存
+        self._save_translation_cache()
 
 
 async def main():
@@ -644,11 +770,12 @@ async def main():
     parser.add_argument("--host", default="http://localhost:11434", help="Ollama服务器地址")
     parser.add_argument("--retries", "-r", type=int, default=3, help="最大重试次数")
     parser.add_argument("--timeout", "-t", type=int, default=60, help="请求超时时间（秒）")
-    parser.add_argument("--batch", "-b", type=int, default=1, help="批处理大小")
+    parser.add_argument("--batch", "-b", type=int, default=100, help="批处理大小")
     parser.add_argument("--openai-model", default="deepseek-chat", help="OpenAI模型名称")
     parser.add_argument("--openai-api-key", default="sk-f3333bd9b06a4fa6b1520f06c010c736", help="OpenAI API密钥")
     parser.add_argument("--openai-base-url", default="https://api.deepseek.com", help="OpenAI API基础URL")
-    parser.add_argument("--max-concurrency", type=int, default=5, help="OpenAI API最大并发请求数量")
+    parser.add_argument("--max-concurrency", type=int, default=100, help="OpenAI API最大并发请求数量")
+    parser.add_argument("--cache-file", default="translation_cache.json", help="翻译缓存文件路径")
     args = parser.parse_args()
 
     # 创建翻译器
