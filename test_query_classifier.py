@@ -31,8 +31,8 @@ def main():
                         help="训练数据路径，JSONL格式，每行包含query、query_strategy和precision_required字段")
     parser.add_argument("--output_dir", type=str, default="./test_model_output", 
                         help="模型输出目录，默认为 ./test_model_output")
-    parser.add_argument("--batch_size", type=int, default=4, help="训练批次大小，默认为4")
-    parser.add_argument("--epochs", type=int, default=2, help="训练轮数，默认为2")
+    parser.add_argument("--batch_size", type=int, default=16, help="训练批次大小，默认为4")
+    parser.add_argument("--epochs", type=int, default=200, help="训练轮数，默认为2")
     parser.add_argument("--log_dir", type=str, default="logs", help="日志目录")
     parser.add_argument("--show_data", action="store_true", help="显示数据样例")
     
