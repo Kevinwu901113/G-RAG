@@ -285,177 +285,111 @@ def train_model(data_path: str, output_dir: str = "./query_classifier_model", ba
         model_name: 预训练模型名称
         local_model_path: 本地模型路径，如果提供则优先使用本地模型
     """
+    # 确保输出目录不包含模型名称本身，避免嵌套目录问题
+    # 检查输出目录是否以模型名称结尾，如果是，则去除
+    if output_dir.endswith("/query_classifier.pkl") or output_dir.endswith("\\query_classifier.pkl"):
+        output_dir = os.path.dirname(output_dir)
+        logger.info(f"调整输出目录路径为: {output_dir}")
+    
+    # 确保输出目录存在
+    os.makedirs(output_dir, exist_ok=True)
+    
     # 加载数据
     texts, labels = load_data(data_path)
     
-    # 初始化分词器
+    # 固定使用bert-base-chinese模型，避免多次尝试不同模型导致的循环
+    fixed_model_name = "bert-base-chinese"
+    logger.info(f"使用固定的预训练模型: {fixed_model_name}")
+    
+    # 初始化分词器和模型
     tokenizer = None
+    model = None
     
-    # 尝试加载分词器的顺序：
-    # 1. 从指定的本地模型路径加载
-    # 2. 从环境变量指定的本地模型路径加载
-    # 3. 从预训练模型名称加载（先尝试本地，再尝试在线）
-    # 4. 使用备用模型
-    # 5. 使用简单分词器
-    
-    # 检查环境变量中是否指定了模型路径
-    env_model_path = os.environ.get("BERT_MODEL_PATH", "")
-    
+    # 简化模型加载逻辑，只尝试加载固定的预训练模型
     try:
-        # 1. 优先尝试从指定的本地路径加载
-        if local_model_path and os.path.exists(local_model_path):
-            logger.info(f"从指定的本地路径加载分词器: {local_model_path}")
-            try:
-                tokenizer = BertTokenizer.from_pretrained(local_model_path, local_files_only=True)
-                logger.info(f"成功从指定的本地路径加载分词器")
-            except Exception as e:
-                logger.warning(f"从指定的本地路径加载分词器失败: {str(e)}")
+        logger.info(f"尝试加载预训练模型分词器: {fixed_model_name}")
+        try:
+            # 先尝试本地加载
+            tokenizer = BertTokenizer.from_pretrained(fixed_model_name, local_files_only=True)
+            logger.info(f"成功从本地加载预训练分词器")
+        except Exception:
+            # 再尝试在线加载
+            tokenizer = BertTokenizer.from_pretrained(fixed_model_name, local_files_only=False)
+            logger.info(f"成功从在线加载预训练分词器")
+    except Exception as e:
+        logger.warning(f"加载预训练分词器失败: {str(e)}")
+        # 使用简单分词器作为备选
+        from transformers import BasicTokenizer
+        logger.warning("预训练分词器加载失败，使用简单分词器替代")
         
-        # 2. 尝试从环境变量指定的路径加载
-        if tokenizer is None and env_model_path and os.path.exists(env_model_path):
-            logger.info(f"尝试从环境变量指定的路径加载分词器: {env_model_path}")
-            try:
-                tokenizer = BertTokenizer.from_pretrained(env_model_path, local_files_only=True)
-                logger.info(f"成功从环境变量指定的路径加载分词器")
-                local_model_path = env_model_path  # 更新本地模型路径
-            except Exception as e:
-                logger.warning(f"从环境变量指定的路径加载分词器失败: {str(e)}")
-        
-        # 3. 尝试从预训练模型名称加载（先尝试本地，再尝试在线）
-        if tokenizer is None:
-            logger.info(f"尝试从预训练模型加载分词器: {model_name}")
-            try:
-                # 先尝试本地加载
-                tokenizer = BertTokenizer.from_pretrained(model_name, local_files_only=True)
-                logger.info(f"成功从本地加载预训练分词器: {model_name}")
-            except Exception as e:
-                logger.warning(f"从本地加载预训练分词器失败，尝试在线加载: {str(e)}")
-                try:
-                    # 再尝试在线加载
-                    tokenizer = BertTokenizer.from_pretrained(model_name, local_files_only=False)
-                    logger.info(f"成功从在线加载预训练分词器: {model_name}")
-                except Exception as e2:
-                    logger.warning(f"从在线加载预训练分词器失败: {str(e2)}")
-        
-        # 4. 尝试使用备用模型
-        if tokenizer is None:
-            backup_models = ["bert-base-chinese", "bert-base-multilingual-uncased", "distilbert-base-uncased"]
-            for backup_model in backup_models:
-                logger.info(f"尝试使用备用模型分词器: {backup_model}")
-                try:
-                    # 先尝试本地加载
-                    tokenizer = BertTokenizer.from_pretrained(backup_model, local_files_only=True)
-                    logger.info(f"成功从本地加载备用分词器: {backup_model}")
-                    model_name = backup_model  # 更新模型名称
-                    break
-                except Exception:
-                    try:
-                        # 再尝试在线加载
-                        tokenizer = BertTokenizer.from_pretrained(backup_model, local_files_only=False)
-                        logger.info(f"成功从在线加载备用分词器: {backup_model}")
-                        model_name = backup_model  # 更新模型名称
-                        break
-                    except Exception as e3:
-                        logger.warning(f"加载备用分词器 {backup_model} 失败: {str(e3)}")
-        
-        # 5. 如果所有尝试都失败，使用简单分词器
-        if tokenizer is None:
-            from transformers import BasicTokenizer
-            logger.warning("所有预训练分词器加载失败，使用简单分词器替代")
+        # 创建一个简单的分词器包装类，模拟BertTokenizer的接口
+        class SimpleTokenizer:
+            def __init__(self):
+                self.basic_tokenizer = BasicTokenizer(do_lower_case=True)
+                self.vocab = {"[PAD]": 0, "[UNK]": 1, "[CLS]": 2, "[SEP]": 3}
+                self.max_len = 512
             
-            # 创建一个简单的分词器包装类，模拟BertTokenizer的接口
-            class SimpleTokenizer:
-                def __init__(self):
-                    self.basic_tokenizer = BasicTokenizer(do_lower_case=True)
-                    self.vocab = {"[PAD]": 0, "[UNK]": 1, "[CLS]": 2, "[SEP]": 3}
-                    self.max_len = 512
+            def __call__(self, text, truncation=True, padding='max_length', max_length=128, return_tensors=None):
+                # 简单分词
+                tokens = ["[CLS]"] + self.basic_tokenizer.tokenize(text)[:max_length-2] + ["[SEP]"]
                 
-                def __call__(self, text, truncation=True, padding='max_length', max_length=128, return_tensors=None):
-                    # 简单分词
-                    tokens = ["[CLS]"] + self.basic_tokenizer.tokenize(text)[:max_length-2] + ["[SEP]"]
-                    
-                    # 转换为ID
-                    input_ids = []
-                    for token in tokens:
-                        if token in self.vocab:
-                            input_ids.append(self.vocab[token])
-                        else:
-                            # 为新词分配ID
-                            self.vocab[token] = len(self.vocab)
-                            input_ids.append(self.vocab[token])
-                    
-                    # 填充
-                    if padding == 'max_length':
-                        attention_mask = [1] * len(input_ids)
-                        padding_length = max_length - len(input_ids)
-                        input_ids = input_ids + [0] * padding_length
-                        attention_mask = attention_mask + [0] * padding_length
-                    
-                    # 转换为张量
-                    if return_tensors == 'pt':
-                        import torch
-                        return {
-                            "input_ids": torch.tensor([input_ids]),
-                            "attention_mask": torch.tensor([attention_mask])
-                        }
-                    
+                # 转换为ID
+                input_ids = []
+                for token in tokens:
+                    if token in self.vocab:
+                        input_ids.append(self.vocab[token])
+                    else:
+                        # 为新词分配ID
+                        self.vocab[token] = len(self.vocab)
+                        input_ids.append(self.vocab[token])
+                
+                # 填充
+                if padding == 'max_length':
+                    attention_mask = [1] * len(input_ids)
+                    padding_length = max_length - len(input_ids)
+                    input_ids = input_ids + [0] * padding_length
+                    attention_mask = attention_mask + [0] * padding_length
+                
+                # 转换为张量
+                if return_tensors == 'pt':
+                    import torch
                     return {
-                        "input_ids": input_ids,
-                        "attention_mask": attention_mask
+                        "input_ids": torch.tensor([input_ids]),
+                        "attention_mask": torch.tensor([attention_mask])
                     }
                 
-                def save_pretrained(self, path):
-                    os.makedirs(path, exist_ok=True)
-                    with open(os.path.join(path, "tokenizer_config.json"), "w") as f:
-                        json.dump({"type": "simple_tokenizer"}, f)
+                return {
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask
+                }
             
-            tokenizer = SimpleTokenizer()
-            logger.info("已初始化简单分词器")
-    
-    except Exception as e:
-        logger.error(f"所有分词器加载方法都失败: {str(e)}")
-        raise RuntimeError("无法加载任何可用的分词器模型")
+            def save_pretrained(self, path):
+                os.makedirs(path, exist_ok=True)
+                with open(os.path.join(path, "tokenizer_config.json"), "w") as f:
+                    json.dump({"type": "simple_tokenizer"}, f)
+        
+        tokenizer = SimpleTokenizer()
+        logger.info("已初始化简单分词器")
     
     # 创建数据集
     dataset = QueryDataset(texts, labels, tokenizer)
     
     # 初始化模型
-    model = None
-    
     try:
-        # 优先尝试从本地路径加载
-        if local_model_path and os.path.exists(local_model_path):
-            logger.info(f"从本地路径加载模型: {local_model_path}")
-            try:
-                model = QueryClassifierModel(local_model_path, num_labels=2, local_files_only=True)
-                logger.info("成功从本地路径加载模型")
-            except Exception as e:
-                logger.warning(f"从本地路径加载模型失败: {str(e)}")
-        
-        # 尝试从预训练模型名称加载
-        if model is None:
-            logger.info(f"从预训练模型加载模型: {model_name}")
-            try:
-                # 先尝试本地加载
-                model = QueryClassifierModel(model_name, num_labels=2, local_files_only=True)
-                logger.info(f"成功从本地加载预训练模型: {model_name}")
-            except Exception as e:
-                logger.warning(f"从本地加载预训练模型失败，尝试在线加载: {str(e)}")
-                try:
-                    # 再尝试在线加载
-                    model = QueryClassifierModel(model_name, num_labels=2, local_files_only=False)
-                    logger.info(f"成功从在线加载预训练模型: {model_name}")
-                except Exception as e2:
-                    logger.warning(f"从在线加载预训练模型失败: {str(e2)}")
-        
-        # 如果所有尝试都失败，创建一个新的模型
-        if model is None:
-            logger.warning("所有预训练模型加载失败，使用随机初始化的模型")
-            model = QueryClassifierModel("bert-base-uncased", num_labels=2, local_files_only=False)
-    
+        logger.info(f"尝试加载预训练模型: {fixed_model_name}")
+        try:
+            # 先尝试本地加载
+            model = QueryClassifierModel(fixed_model_name, num_labels=2, local_files_only=True)
+            logger.info("成功从本地加载预训练模型")
+        except Exception:
+            # 再尝试在线加载
+            model = QueryClassifierModel(fixed_model_name, num_labels=2, local_files_only=False)
+            logger.info("成功从在线加载预训练模型")
     except Exception as e:
-        logger.error(f"所有模型加载方法都失败: {str(e)}")
-        raise RuntimeError("无法加载模型")
+        logger.warning(f"加载预训练模型失败: {str(e)}")
+        # 使用随机初始化的模型作为备选
+        logger.warning("预训练模型加载失败，使用随机初始化的模型")
+        model = QueryClassifierModel("bert-base-uncased", num_labels=2, local_files_only=False)
     
     # 设置训练参数
     training_args = TrainingArguments(
@@ -516,11 +450,16 @@ class QueryClassifier:
         Args:
             model_path: 模型路径
         """
+        # 确保模型路径不包含模型名称本身，避免嵌套目录问题
+        if model_path.endswith("/query_classifier.pkl") or model_path.endswith("\\query_classifier.pkl"):
+            model_path = os.path.dirname(model_path)
+            logger.info(f"调整模型路径为: {model_path}")
+            
         self.model_path = model_path
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # 检查环境变量中是否指定了模型路径
-        env_model_path = os.environ.get("BERT_MODEL_PATH", "")
+        # 确保模型目录存在
+        os.makedirs(model_path, exist_ok=True)
         
         # 加载模型和分词器
         logger.info(f"从 {model_path} 加载模型")
@@ -529,12 +468,7 @@ class QueryClassifier:
         self.model = None
         self.tokenizer = None
         
-        # 尝试加载模型的顺序：
-        # 1. 从指定路径加载预训练模型
-        # 2. 从环境变量指定的路径加载
-        # 3. 使用QueryClassifierModel直接初始化
-        # 4. 使用简单分词器和随机初始化模型
-        
+        # 简化模型加载逻辑
         # 1. 尝试从指定路径加载预训练模型
         try:
             logger.info(f"尝试从 {model_path} 加载预训练模型")
@@ -546,134 +480,91 @@ class QueryClassifier:
                 logger.info(f"成功从 {model_path} 加载预训练模型")
             except Exception as e:
                 logger.warning(f"从 {model_path} 加载预训练模型失败: {str(e)}")
-            
-            # 尝试加载分词器
-            if self.model is not None:
+                # 使用固定的预训练模型初始化
+                fixed_model_name = "bert-base-chinese"
                 try:
-                    self.tokenizer = BertTokenizer.from_pretrained(model_path, local_files_only=True)
-                    logger.info(f"成功从 {model_path} 加载分词器")
-                except Exception as e:
-                    logger.warning(f"从 {model_path} 加载分词器失败: {str(e)}")
-                    self.tokenizer = None
-        except Exception as e:
-            logger.warning(f"从指定路径加载预训练模型时出错: {str(e)}")
-        
-        # 2. 尝试从环境变量指定的路径加载
-        if self.model is None or self.tokenizer is None:
-            if env_model_path and os.path.exists(env_model_path):
-                logger.info(f"尝试从环境变量指定的路径加载: {env_model_path}")
-                try:
-                    if self.model is None:
-                        try:
-                            self.model = QueryClassifierModel.from_pretrained(env_model_path)
-                            self.model.to(self.device)
-                            self.model.eval()
-                            logger.info(f"成功从环境变量指定的路径加载模型")
-                        except Exception as e:
-                            logger.warning(f"从环境变量指定的路径加载模型失败: {str(e)}")
-                    
-                    if self.tokenizer is None:
-                        try:
-                            self.tokenizer = BertTokenizer.from_pretrained(env_model_path, local_files_only=True)
-                            logger.info(f"成功从环境变量指定的路径加载分词器")
-                        except Exception as e:
-                            logger.warning(f"从环境变量指定的路径加载分词器失败: {str(e)}")
-                except Exception as e:
-                    logger.warning(f"从环境变量指定的路径加载时出错: {str(e)}")
-        
-        # 3. 使用QueryClassifierModel直接初始化
-        if self.model is None:
-            logger.info("尝试使用QueryClassifierModel直接初始化模型")
-            try:
-                # 先尝试本地加载
-                self.model = QueryClassifierModel(model_path, num_labels=2, local_files_only=True)
-                self.model.to(self.device)
-                self.model.eval()
-                logger.info("成功使用QueryClassifierModel初始化模型")
-            except Exception as e:
-                logger.warning(f"使用QueryClassifierModel初始化模型失败: {str(e)}")
-                try:
-                    # 尝试使用默认配置初始化
+                    self.model = QueryClassifierModel(fixed_model_name, num_labels=2, local_files_only=False)
+                    self.model.to(self.device)
+                    self.model.eval()
+                    logger.info(f"成功使用固定预训练模型 {fixed_model_name} 初始化")
+                except Exception as e2:
+                    logger.error(f"使用固定预训练模型初始化失败: {str(e2)}")
+                    # 使用随机初始化的模型
+                    from transformers import BertConfig
+                    logger.warning("使用随机初始化的模型")
+                    config = BertConfig(hidden_size=768, num_attention_heads=12, num_hidden_layers=6)
                     self.model = QueryClassifierModel("bert-base-uncased", num_labels=2, local_files_only=False)
                     self.model.to(self.device)
                     self.model.eval()
-                    logger.info("成功使用默认配置初始化模型")
-                except Exception as e2:
-                    logger.error(f"使用默认配置初始化模型也失败: {str(e2)}")
-                    raise RuntimeError(f"无法初始化模型: {str(e)}")
-        
-        # 尝试加载分词器，如果失败则使用备用分词器或简单分词器
-        if self.tokenizer is None:
-            logger.info("尝试加载备用分词器")
-            backup_models = ["bert-base-chinese", "bert-base-multilingual-uncased", "distilbert-base-uncased"]
-            for backup_model in backup_models:
-                try:
-                    # 先尝试本地加载
-                    self.tokenizer = BertTokenizer.from_pretrained(backup_model, local_files_only=True)
-                    logger.info(f"成功从本地加载备用分词器: {backup_model}")
-                    break
-                except Exception:
-                    try:
-                        # 再尝试在线加载
-                        self.tokenizer = BertTokenizer.from_pretrained(backup_model, local_files_only=False)
-                        logger.info(f"成功从在线加载备用分词器: {backup_model}")
-                        break
-                    except Exception as e:
-                        logger.warning(f"加载备用分词器 {backup_model} 失败: {str(e)}")
             
-            # 如果所有备用分词器都加载失败，使用简单分词器
-            if self.tokenizer is None:
-                from transformers import BasicTokenizer
-                logger.warning("所有备用分词器加载失败，使用简单分词器替代")
-                
-                # 创建一个简单的分词器包装类，模拟BertTokenizer的接口
-                class SimpleTokenizer:
-                    def __init__(self):
-                        self.basic_tokenizer = BasicTokenizer(do_lower_case=True)
-                        self.vocab = {"[PAD]": 0, "[UNK]": 1, "[CLS]": 2, "[SEP]": 3}
-                        self.max_len = 512
+            # 尝试加载分词器
+            try:
+                self.tokenizer = BertTokenizer.from_pretrained(model_path, local_files_only=True)
+                logger.info(f"成功从 {model_path} 加载分词器")
+            except Exception as e:
+                logger.warning(f"从 {model_path} 加载分词器失败: {str(e)}")
+                # 使用固定的预训练分词器
+                fixed_model_name = "bert-base-chinese"
+                try:
+                    self.tokenizer = BertTokenizer.from_pretrained(fixed_model_name, local_files_only=False)
+                    logger.info(f"成功加载固定预训练分词器 {fixed_model_name}")
+                except Exception as e2:
+                    logger.warning(f"加载固定预训练分词器失败: {str(e2)}")
+                    # 使用简单分词器
+                    from transformers import BasicTokenizer
+                    logger.warning("使用简单分词器替代")
                     
-                    def __call__(self, text, return_tensors=None, truncation=True, padding='max_length', max_length=128):
-                        # 简单分词
-                        tokens = ["[CLS]"] + self.basic_tokenizer.tokenize(text)[:max_length-2] + ["[SEP]"]
+                    # 创建一个简单的分词器包装类，模拟BertTokenizer的接口
+                    class SimpleTokenizer:
+                        def __init__(self):
+                            self.basic_tokenizer = BasicTokenizer(do_lower_case=True)
+                            self.vocab = {"[PAD]": 0, "[UNK]": 1, "[CLS]": 2, "[SEP]": 3}
+                            self.max_len = 512
                         
-                        # 转换为ID
-                        input_ids = []
-                        for token in tokens:
-                            if token in self.vocab:
-                                input_ids.append(self.vocab[token])
-                            else:
-                                # 为新词分配ID
-                                self.vocab[token] = len(self.vocab)
-                                input_ids.append(self.vocab[token])
-                        
-                        # 填充
-                        if padding == 'max_length':
-                            attention_mask = [1] * len(input_ids)
-                            padding_length = max_length - len(input_ids)
-                            input_ids = input_ids + [0] * padding_length
-                            attention_mask = attention_mask + [0] * padding_length
-                        
-                        # 转换为张量
-                        if return_tensors == 'pt':
-                            import torch
+                        def __call__(self, text, return_tensors=None, truncation=True, padding='max_length', max_length=128):
+                            # 简单分词
+                            tokens = ["[CLS]"] + self.basic_tokenizer.tokenize(text)[:max_length-2] + ["[SEP]"]
+                            
+                            # 转换为ID
+                            input_ids = []
+                            for token in tokens:
+                                if token in self.vocab:
+                                    input_ids.append(self.vocab[token])
+                                else:
+                                    # 为新词分配ID
+                                    self.vocab[token] = len(self.vocab)
+                                    input_ids.append(self.vocab[token])
+                            
+                            # 填充
+                            if padding == 'max_length':
+                                attention_mask = [1] * len(input_ids)
+                                padding_length = max_length - len(input_ids)
+                                input_ids = input_ids + [0] * padding_length
+                                attention_mask = attention_mask + [0] * padding_length
+                            
+                            # 转换为张量
+                            if return_tensors == 'pt':
+                                import torch
+                                return {
+                                    "input_ids": torch.tensor([input_ids]),
+                                    "attention_mask": torch.tensor([attention_mask])
+                                }
+                            
                             return {
-                                "input_ids": torch.tensor([input_ids]),
-                                "attention_mask": torch.tensor([attention_mask])
+                                "input_ids": input_ids,
+                                "attention_mask": attention_mask
                             }
                         
-                        return {
-                            "input_ids": input_ids,
-                            "attention_mask": attention_mask
-                        }
+                        def save_pretrained(self, path):
+                            os.makedirs(path, exist_ok=True)
+                            with open(os.path.join(path, "tokenizer_config.json"), "w") as f:
+                                json.dump({"type": "simple_tokenizer"}, f)
                     
-                    def save_pretrained(self, path):
-                        os.makedirs(path, exist_ok=True)
-                        with open(os.path.join(path, "tokenizer_config.json"), "w") as f:
-                            json.dump({"type": "simple_tokenizer"}, f)
-                
-                self.tokenizer = SimpleTokenizer()
-                logger.info("已初始化简单分词器")
+                    self.tokenizer = SimpleTokenizer()
+                    logger.info("已初始化简单分词器")
+        except Exception as e:
+            logger.error(f"初始化模型和分词器时出错: {str(e)}")
+            raise RuntimeError(f"无法初始化模型和分词器: {str(e)}")
         
         # 加载标签映射
         label_maps_path = os.path.join(model_path, "label_maps.json")

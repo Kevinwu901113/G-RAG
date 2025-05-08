@@ -130,12 +130,51 @@ async def run_query_classifier(config: Dict[str, Any], train_data_path: Optional
         # 创建查询分类器管理器
         classifier_manager = QueryClassifierManager(config)
         
-        # 如果提供了训练数据，则训练分类器
-        if train_data_path:
-            success = await classifier_manager.train(train_data_path)
+        # 检查是否启用持续学习
+        if config.get("query_classifier", {}).get("continual_learning", False):
+            logger.info("检测到持续学习配置，启用持续学习模式")
+            from grag.classifier.continual_trainer import ContinualTrainer
+            
+            # 获取模型路径和其他配置
+            model_path = config["query_classifier"].get("model_path", "./result/models/query_classifier.pkl")
+            
+            # 确保模型路径指向文件而不是目录
+            if os.path.isdir(model_path):
+                model_path = os.path.join(model_path, "query_classifier.pkl")
+                logger.info(f"检测到模型路径是目录，已调整为文件路径: {model_path}")
+                
+            # 确保模型目录存在
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            
+            buffer_path = config["query_classifier"].get("buffer_path", "logs/continual_buffer.jsonl")
+            
+            # 创建持续学习训练器
+            trainer = ContinualTrainer(
+                config_path=None,  # 直接使用已加载的配置
+                model_path=model_path,
+                buffer_path=buffer_path,
+                batch_size=config["query_classifier"].get("batch_size", 16),
+                epochs=config["query_classifier"].get("epochs", 3)
+            )
+            
+            # 运行持续学习
+            success = trainer.run_continual_learning()
+            
+            # 如果持续学习成功或没有新数据，仍然需要加载模型
+            if not success or train_data_path:
+                logger.info("持续学习后加载模型或使用提供的训练数据进行训练")
+                if train_data_path:
+                    success = await classifier_manager.train(train_data_path)
+                else:
+                    success = classifier_manager.load_model()
         else:
-            # 否则只加载现有模型
-            success = classifier_manager.load_model()
+            # 常规训练或加载模型
+            if train_data_path:
+                logger.info(f"使用训练数据进行分类器训练: {train_data_path}")
+                success = await classifier_manager.train(train_data_path)
+            else:
+                logger.info("加载现有分类器模型")
+                success = classifier_manager.load_model()
         
         if success:
             logger.info("查询分类器集成步骤完成")
@@ -145,6 +184,8 @@ async def run_query_classifier(config: Dict[str, Any], train_data_path: Optional
         return success
     except Exception as e:
         logger.error(f"查询分类器集成步骤出错: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return False
 
 

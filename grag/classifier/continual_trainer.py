@@ -62,6 +62,15 @@ class ContinualTrainer:
         self.epochs = epochs
         self.save_backup = save_backup
         
+        # 处理模型路径是目录的情况
+        if os.path.isdir(self.model_path):
+            model_file_path = os.path.join(self.model_path, "query_classifier.pkl")
+            logger.info(f"初始化时检测到模型路径是目录，已调整为文件路径: {model_file_path}")
+            self.model_path = model_file_path
+            
+        # 确保模型目录存在
+        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+        
         # 如果提供了配置文件路径，从中加载配置
         if config_path and os.path.exists(config_path):
             self._load_config(config_path)
@@ -214,6 +223,15 @@ class ContinualTrainer:
         Returns:
             是否成功训练模型
         """
+        # 处理模型路径是目录的情况
+        if os.path.isdir(self.model_path):
+            model_file_path = os.path.join(self.model_path, "query_classifier.pkl")
+            logger.info(f"检测到模型路径是目录，已调整为文件路径: {model_file_path}")
+            self.model_path = model_file_path
+            
+        # 确保模型目录存在
+        os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+            
         if not os.path.exists(train_data_path):
             logger.error(f"找不到训练数据: {train_data_path}")
             return False
@@ -301,6 +319,15 @@ class ContinualTrainer:
             return False
         
         try:
+            # 处理模型路径是目录的情况
+            if os.path.isdir(self.model_path):
+                model_file_path = os.path.join(self.model_path, "query_classifier.pkl")
+                logger.info(f"检测到模型路径是目录，已调整为文件路径: {model_file_path}")
+                self.model_path = model_file_path
+            
+            # 确保模型目录存在
+            os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+            
             # 检查模型路径是否存在
             if not os.path.exists(self.model_path):
                 logger.error(f"模型路径不存在: {self.model_path}")

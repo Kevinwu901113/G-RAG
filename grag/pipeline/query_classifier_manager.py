@@ -59,8 +59,24 @@ class QueryClassifierManager:
         Returns:
             是否成功加载模型
         """
+        # 处理模型路径是目录的情况
+        if os.path.isdir(self.model_path):
+            # 检查路径是否已经包含文件名，避免嵌套问题
+            if self.model_path.endswith("query_classifier.pkl"):
+                logger.info(f"检测到模型路径已包含文件名但被识别为目录: {self.model_path}")
+                # 不需要再次添加文件名，使用父目录
+                parent_dir = os.path.dirname(self.model_path)
+                self.model_path = parent_dir
+            else:
+                self.model_path = os.path.join(self.model_path, "query_classifier.pkl")
+            
+            logger.info(f"检测到模型路径是目录，已调整为文件路径: {self.model_path}")
+        
         if not os.path.exists(self.model_path):
             logger.warning(f"找不到分类器模型: {self.model_path}")
+            
+            # 确保模型目录存在
+            os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
             
             # 尝试自动训练模型
             logger.info("尝试自动训练查询分类器模型...")
